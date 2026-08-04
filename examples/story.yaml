@@ -4,6 +4,7 @@ characters:
     name: Settler
     image: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\characters\Settler2.png
     position: left
+
   captain:
     name: Capitaine
     image: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\characters\Pilot2.png
@@ -11,19 +12,28 @@ characters:
 
 scenes:
   - id: intro
-    music : C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\audio\Forgotten Biomes.ogg
+    music: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\audio\Forgotten Biomes.ogg
     background: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\bg\bg_spaceship.jpg
-    dim_opacity: 0
-    characters: [settler, captain]
+
+    # 0 = aucun assombrissement
+    # 255 = personnage entièrement noir
+    character_dim: 120
+
+    characters:
+      - settler
+      - captain
+
     actions:
       - settler: "Welcome travelers! Are you ready for the journey?"
       - captain: "We depart at dawn. Have you made your decision?"
+
       - choice:
           - text: "Explorer"
             actions:
               - settler: "Excellent! Prepare yourself."
               - captain: "I'll set the course."
             goto: explore
+
           - text: "Rester"
             actions:
               - captain: "As you wish. Stay then."
@@ -32,10 +42,14 @@ scenes:
             goto: stay_scene
 
   - id: explore
-    music : C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\audio\Drifting Memories.ogg
+    music: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\audio\Drifting Memories.ogg
     background: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\bg\bg_spaceship.jpg
-    dim_opacity: 0
-    characters: [settler, captain]
+    character_dim: 120
+
+    characters:
+      - settler
+      - captain
+
     actions:
       - captain: "Engines are online. We're heading out!"
       - settler: "I'll chart the stars."
@@ -43,7 +57,10 @@ scenes:
 
   - id: stay_scene
     background: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\bg\bg_spaceship.jpg
-    dim_opacity: 0
-    characters: [captain]
+    character_dim: 120
+
+    characters:
+      - captain
+
     actions:
       - captain: "You chose to stay. The ship departs without you."

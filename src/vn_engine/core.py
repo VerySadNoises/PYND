@@ -1,27 +1,47 @@
-import pygame
 import json
 from pathlib import Path
+
+import pygame
+
 from vn_engine.script_parser import load_story
 from vn_engine.characters import CharacterRegistry
 from vn_engine.dialogue import ActionExecutor
 
-_VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
+
+_VIDEO_EXTS = {
+    ".mp4",
+    ".avi",
+    ".mov",
+    ".mkv",
+    ".webm",
+}
 
 
 class SaveManager:
     def __init__(self, save_dir="saves"):
         self.save_dir = Path(save_dir)
-        self.save_dir.mkdir(parents=True, exist_ok=True)
+        self.save_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
     def save(self, slot, data):
         path = self.save_dir / f"slot_{slot}.json"
-        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        path.write_text(
+            json.dumps(data, indent=2),
+            encoding="utf-8",
+        )
 
     def load(self, slot):
         path = self.save_dir / f"slot_{slot}.json"
+
         if not path.exists():
             return None
-        return json.loads(path.read_text(encoding="utf-8"))
+
+        return json.loads(
+            path.read_text(encoding="utf-8")
+        )
 
 
 class VNApp:
@@ -32,169 +52,392 @@ class VNApp:
     _CHOICE_COLOR = (200, 200, 100)
     _CHOICE_HOVER = (255, 255, 160)
 
-    def __init__(self, story_path, width=1280, height=720):
+    def __init__(
+        self,
+        story_path,
+        width=1280,
+        height=720,
+    ):
         pygame.init()
-        pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
-        self.W, self.H = width, height
-        self.screen = pygame.display.set_mode((self.W, self.H))
+
+        try:
+            pygame.mixer.init(
+                frequency=44100,
+                size=-16,
+                channels=2,
+                buffer=512,
+            )
+        except pygame.error as error:
+            print(f"[Audio] Initialisation impossible: {error}")
+
+        self.W = width
+        self.H = height
+
+        self.screen = pygame.display.set_mode(
+            (self.W, self.H)
+        )
+
         pygame.display.set_caption("VN Engine")
+
         self.clock = pygame.time.Clock()
+
         self.font_text = pygame.font.Font(None, 30)
         self.font_speaker = pygame.font.Font(None, 36)
         self.font_choice = pygame.font.Font(None, 28)
 
         story = load_story(story_path)
+
         self.base_dir = Path(story_path).resolve().parent
-        self.chars = CharacterRegistry(story["characters"], base_dir=self.base_dir)
+
+        self.chars = CharacterRegistry(
+            story["characters"],
+            base_dir=self.base_dir,
+        )
+
         self.scenes = story["scenes"]
 
         self.variables = {}
         self.save_manager = SaveManager()
         self.executor = ActionExecutor()
+
+        # ------------------------------------------------------------------
+        # Arrière-plan
+        # ------------------------------------------------------------------
+
         self.current_bg = None
-        # animated GIF: list of (surface, duration_ms)
+
+        # GIF animé : liste de tuples (surface, durée_en_ms)
         self._bg_frames = None
         self._bg_frame_idx = 0
         self._bg_frame_elapsed = 0
-        # video playback via OpenCV + optional audio via ffpyplayer
+
+        # Vidéo via OpenCV et audio optionnel via ffpyplayer.
         self._bg_video = None
         self._bg_video_ms = 0.0
         self._bg_video_elapsed = 0
         self._bg_audio = None
-        self.dim_opacity = 160
+
+        # ------------------------------------------------------------------
+        # Dialogues et personnages
+        # ------------------------------------------------------------------
+
+        # Cette valeur ne représente plus une opacité.
+        # Elle représente maintenant une quantité d'assombrissement :
+        #
+        # 0   = aucune modification
+        # 255 = personnage complètement noir
+        #
+        # Le canal alpha du personnage reste toujours inchangé.
+        self.character_dim = 120
+
+        self.current_speaker_id = None
+        self.current_speaker_name = ""
+        self.current_text = ""
+
+        self.choices = []
+        self._choice_rects = []
+
+        self.mode = "running"
+        self.running = True
+
+        first_scene_id = next(iter(self.scenes), None)
+
+        if first_scene_id is None:
+            print("[VN] Aucun scénario trouvé.")
+            self.running = False
+        else:
+            self._load_scene(first_scene_id)
+
+    # ------------------------------------------------------------------
+    # Chargement d'une scène
+    # ------------------------------------------------------------------
+
+    def _load_scene(self, scene_id):
+        scene = self.scenes.get(scene_id)
+
+        if scene is None:
+            print(f"[VN] Scene not found: {scene_id}")
+            self.running = False
+            return
+
+        self._load_background(scene.get("background"))
+        self._play_music(scene.get("music"))
+
+        # Nouveau nom conseillé dans le YAML : character_dim.
+        #
+        # dim_opacity reste accepté pour conserver la compatibilité avec
+        # les anciens fichiers, mais la valeur ne contrôle plus une opacité.
+        self.character_dim = scene.get(
+            "character_dim",
+            scene.get("dim_opacity", 120),
+        )
+
+        try:
+            self.character_dim = int(self.character_dim)
+        except (TypeError, ValueError):
+            self.character_dim = 120
+
+        self.character_dim = max(
+            0,
+            min(255, self.character_dim),
+        )
+
+        self.chars.hide_all()
+
+        for entry in scene.get("characters") or []:
+            if isinstance(entry, dict):
+                character_id = next(iter(entry), None)
+
+                if character_id is None:
+                    continue
+
+                character_config = entry.get(character_id) or {}
+                position = character_config.get("position")
+
+            else:
+                character_id = entry
+                position = None
+
+            self.chars.show(
+                character_id,
+                (self.W, self.H),
+                position=position,
+            )
+
         self.current_speaker_id = None
         self.current_speaker_name = ""
         self.current_text = ""
         self.choices = []
         self._choice_rects = []
-        self.mode = "running"
-        self.running = True
 
-        self._load_scene(next(iter(self.scenes)))
+        self.executor.load(
+            scene.get("actions", [])
+        )
+
+        self.mode = "running"
 
     # ------------------------------------------------------------------
-    # Scene loading
+    # Chargement de l'arrière-plan
     # ------------------------------------------------------------------
-
-    def _load_scene(self, scene_id):
-        scene = self.scenes.get(scene_id)
-        if not scene:
-            print(f"[VN] Scene not found: {scene_id}")
-            self.running = False
-            return
-        self._load_background(scene.get("background"))
-        self._play_music(scene.get("music"))
-        self.dim_opacity = scene.get("dim_opacity", 160)
-        self.chars.hide_all()
-        for entry in (scene.get("characters") or []):
-            if isinstance(entry, dict):
-                cid = next(iter(entry))
-                pos = (entry[cid] or {}).get("position")
-            else:
-                cid, pos = entry, None
-            self.chars.show(cid, (self.W, self.H), position=pos)
-        self.executor.load(scene.get("actions", []))
-        self.mode = "running"
 
     def _load_background(self, bg_spec):
-        if self._bg_video:
+        if self._bg_video is not None:
             self._bg_video.release()
-        if self._bg_audio:
+
+        if self._bg_audio is not None:
             try:
                 self._bg_audio.close_player()
             except Exception:
                 pass
+
         self.current_bg = None
+
         self._bg_frames = None
         self._bg_frame_idx = 0
         self._bg_frame_elapsed = 0
+
         self._bg_video = None
         self._bg_video_elapsed = 0
+
         self._bg_audio = None
+
         if not bg_spec:
             return
-        # accept either a plain path string or {file: ..., audio: true/false}
+
+        # Accepte :
+        #
+        # background: chemin/image.png
+        #
+        # ou :
+        #
+        # background:
+        #   file: chemin/video.mp4
+        #   audio: true
         if isinstance(bg_spec, dict):
-            bg_path = bg_spec.get("file") or bg_spec.get("path", "")
-            audio = bg_spec.get("audio", False)
+            bg_path = (
+                bg_spec.get("file")
+                or bg_spec.get("path", "")
+            )
+
+            audio = bool(bg_spec.get("audio", False))
+
         else:
             bg_path = bg_spec
             audio = False
+
         try:
-            p = Path(bg_path)
-            if not p.is_absolute():
-                p = (self.base_dir / p).resolve()
-            ext = p.suffix.lower()
-            if ext in _VIDEO_EXTS:
-                self._open_video(p, audio=audio)
-            elif ext == ".gif":
-                self._bg_frames = self._load_gif_frames(p)
+            path = Path(bg_path)
+
+            if not path.is_absolute():
+                path = (self.base_dir / path).resolve()
+
+            extension = path.suffix.lower()
+
+            if extension in _VIDEO_EXTS:
+                self._open_video(
+                    path,
+                    audio=audio,
+                )
+
+            elif extension == ".gif":
+                self._bg_frames = self._load_gif_frames(path)
+
                 if self._bg_frames:
                     self.current_bg = self._bg_frames[0][0]
+
             else:
-                surf = pygame.image.load(str(p)).convert()
-                self.current_bg = pygame.transform.scale(surf, (self.W, self.H))
-        except Exception as e:
-            print(f"[BG] {e}")
+                surface = pygame.image.load(str(path)).convert()
+
+                self.current_bg = pygame.transform.scale(
+                    surface,
+                    (self.W, self.H),
+                )
+
+        except Exception as error:
+            print(f"[BG] {error}")
 
     def _open_video(self, path, audio=False):
         try:
             import cv2
         except ImportError:
-            print("[BG] pip install opencv-python pour utiliser des vidéos")
+            print(
+                "[BG] Installez opencv-python pour utiliser "
+                "des vidéos : pip install opencv-python"
+            )
             return
-        cap = cv2.VideoCapture(str(path))
-        if not cap.isOpened():
+
+        capture = cv2.VideoCapture(str(path))
+
+        if not capture.isOpened():
             print(f"[BG] Impossible d'ouvrir la vidéo: {path}")
             return
-        fps = cap.get(cv2.CAP_PROP_FPS) or 24
-        self._bg_video = cap
+
+        fps = capture.get(cv2.CAP_PROP_FPS)
+
+        if not fps or fps <= 0:
+            fps = 24
+
+        self._bg_video = capture
         self._bg_video_ms = 1000.0 / fps
+
         if audio:
             try:
                 from ffpyplayer.player import MediaPlayer
-                # vn=1 disables ffpyplayer's own video decoding (we use OpenCV)
-                self._bg_audio = MediaPlayer(str(path), ff_opts={"vn": False, "an": False})
+
+                self._bg_audio = MediaPlayer(
+                    str(path),
+                    ff_opts={
+                        "vn": False,
+                        "an": False,
+                    },
+                )
+
             except ImportError:
-                print("[BG] pip install ffpyplayer pour l'audio des vidéos")
-            except Exception as e:
-                print(f"[BG] Audio init error: {e}")
+                print(
+                    "[BG] Installez ffpyplayer pour l'audio "
+                    "des vidéos : pip install ffpyplayer"
+                )
+
+            except Exception as error:
+                print(f"[BG] Audio init error: {error}")
+
         self._advance_video_frame()
 
     def _advance_video_frame(self):
+        if self._bg_video is None:
+            return
+
         import cv2
-        ok, frame = self._bg_video.read()
-        if not ok:
-            self._bg_video.set(cv2.CAP_PROP_POS_FRAMES, 0)  # loop
-            ok, frame = self._bg_video.read()
-        if ok:
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            h, w = frame_rgb.shape[:2]
-            surf = pygame.image.frombuffer(frame_rgb.tobytes(), (w, h), "RGB").convert()
-            self.current_bg = pygame.transform.scale(surf, (self.W, self.H))
+
+        success, frame = self._bg_video.read()
+
+        if not success:
+            self._bg_video.set(
+                cv2.CAP_PROP_POS_FRAMES,
+                0,
+            )
+
+            success, frame = self._bg_video.read()
+
+        if not success:
+            return
+
+        frame_rgb = cv2.cvtColor(
+            frame,
+            cv2.COLOR_BGR2RGB,
+        )
+
+        height, width = frame_rgb.shape[:2]
+
+        surface = pygame.image.frombuffer(
+            frame_rgb.tobytes(),
+            (width, height),
+            "RGB",
+        ).convert()
+
+        self.current_bg = pygame.transform.scale(
+            surface,
+            (self.W, self.H),
+        )
 
     def _load_gif_frames(self, path):
-        """Return list of (surface, duration_ms) for each GIF frame."""
+        """
+        Retourne une liste de tuples :
+            (surface, durée_en_ms)
+        """
         try:
             from PIL import Image
         except ImportError:
-            print("[BG] Install Pillow to use animated GIFs: pip install Pillow")
+            print(
+                "[BG] Installez Pillow pour utiliser les GIF animés : "
+                "pip install Pillow"
+            )
             return None
+
         frames = []
-        with Image.open(path) as img:
-            for i in range(getattr(img, 'n_frames', 1)):
-                img.seek(i)
-                duration = img.info.get("duration", 100)  # ms per frame
-                frame_rgba = img.convert("RGBA")
-                raw = frame_rgba.tobytes()
-                size = frame_rgba.size
-                surf = pygame.image.fromstring(raw, size, "RGBA").convert_alpha()
-                surf = pygame.transform.scale(surf, (self.W, self.H))
-                frames.append((surf, max(duration, 20)))
-        return frames if frames else None
+
+        try:
+            with Image.open(path) as image:
+                frame_count = getattr(image, "n_frames", 1)
+
+                for frame_index in range(frame_count):
+                    image.seek(frame_index)
+
+                    duration = image.info.get(
+                        "duration",
+                        100,
+                    )
+
+                    frame_rgba = image.convert("RGBA")
+                    raw = frame_rgba.tobytes()
+                    size = frame_rgba.size
+
+                    surface = pygame.image.fromstring(
+                        raw,
+                        size,
+                        "RGBA",
+                    ).convert_alpha()
+
+                    surface = pygame.transform.scale(
+                        surface,
+                        (self.W, self.H),
+                    )
+
+                    frames.append(
+                        (
+                            surface,
+                            max(int(duration), 20),
+                        )
+                    )
+
+        except Exception as error:
+            print(f"[BG] Impossible de charger le GIF '{path}': {error}")
+            return None
+
+        return frames or None
 
     # ------------------------------------------------------------------
-    # Main loop
+    # Boucle principale
     # ------------------------------------------------------------------
 
     def run(self):
@@ -202,29 +445,53 @@ class VNApp:
             self._handle_events()
             self._update()
             self._render()
+
             self.clock.tick(60)
+
+        if self._bg_video is not None:
+            self._bg_video.release()
+
+        if self._bg_audio is not None:
+            try:
+                self._bg_audio.close_player()
+            except Exception:
+                pass
+
+        pygame.mixer.music.stop()
         pygame.quit()
 
     def _handle_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
+
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
-                elif event.key == pygame.K_SPACE and self.mode == "waiting":
+
+                elif (
+                    event.key == pygame.K_SPACE
+                    and self.mode == "waiting"
+                ):
                     self.mode = "running"
+
                 elif self.mode == "choice":
-                    idx = event.key - pygame.K_1
-                    if 0 <= idx < len(self.choices):
-                        self._select_choice(idx)
-            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    choice_index = event.key - pygame.K_1
+
+                    if 0 <= choice_index < len(self.choices):
+                        self._select_choice(choice_index)
+
+            elif (
+                event.type == pygame.MOUSEBUTTONDOWN
+                and event.button == 1
+            ):
                 if self.mode == "waiting":
                     self.mode = "running"
+
                 elif self.mode == "choice":
-                    for i, rect in enumerate(self._choice_rects):
+                    for index, rect in enumerate(self._choice_rects):
                         if rect.collidepoint(event.pos):
-                            self._select_choice(i)
+                            self._select_choice(index)
                             break
 
     def _update(self):
@@ -235,14 +502,17 @@ class VNApp:
         if self.executor.finished:
             self.running = False
             return
+
         action = self.executor.current()
+
         if action is None:
             self.running = False
             return
+
         self._dispatch(action)
 
     # ------------------------------------------------------------------
-    # Action dispatcher
+    # Exécution des actions
     # ------------------------------------------------------------------
 
     def _dispatch(self, action):
@@ -251,10 +521,22 @@ class VNApp:
             return
 
         if "say" in action:
-            d = action["say"] or {}
-            self.current_speaker_name = d.get("speaker", "")
-            self.current_speaker_id = self.chars.resolve_speaker(self.current_speaker_name)
-            self.current_text = d.get("text", "")
+            dialogue = action["say"] or {}
+
+            self.current_speaker_name = dialogue.get(
+                "speaker",
+                "",
+            )
+
+            self.current_speaker_id = self.chars.resolve_speaker(
+                self.current_speaker_name
+            )
+
+            self.current_text = dialogue.get(
+                "text",
+                "",
+            )
+
             self.executor.advance()
             self.mode = "waiting"
 
@@ -263,29 +545,50 @@ class VNApp:
             self.mode = "choice"
 
         elif "set" in action:
-            for k, v in (action["set"] or {}).items():
-                self.variables[k] = v
+            for key, value in (action["set"] or {}).items():
+                self.variables[key] = value
+
             self.executor.advance()
 
         elif "jump" in action or "goto" in action:
-            dest = action.get("jump") or action.get("goto")
-            if dest in self.scenes:
-                self._load_scene(dest)
+            destination = (
+                action.get("jump")
+                or action.get("goto")
+            )
+
+            if destination in self.scenes:
+                self._load_scene(destination)
+
             else:
-                print(f"[VN] Unknown scene: {dest}")
+                print(f"[VN] Unknown scene: {destination}")
                 self.executor.advance()
 
         elif "show" in action:
-            d = action["show"] or {}
-            cid = d.get("id")
-            if cid:
-                self.chars.show(cid, (self.W, self.H), position=d.get("position"))
+            show_data = action["show"] or {}
+            character_id = show_data.get("id")
+
+            if character_id:
+                self.chars.show(
+                    character_id,
+                    (self.W, self.H),
+                    position=show_data.get("position"),
+                )
+
             self.executor.advance()
 
         elif "hide" in action:
-            d = action["hide"]
-            cid = d.get("id") if isinstance(d, dict) else d
-            self.chars.hide(cid) if cid else self.chars.hide_all()
+            hide_data = action["hide"]
+
+            if isinstance(hide_data, dict):
+                character_id = hide_data.get("id")
+            else:
+                character_id = hide_data
+
+            if character_id:
+                self.chars.hide(character_id)
+            else:
+                self.chars.hide_all()
+
             self.executor.advance()
 
         elif "background" in action:
@@ -299,117 +602,303 @@ class VNApp:
         else:
             self.executor.advance()
 
+    # ------------------------------------------------------------------
+    # Musique
+    # ------------------------------------------------------------------
+
     def _play_music(self, spec):
+        if not pygame.mixer.get_init():
+            return
+
         if not spec or spec in ("stop", "none", False):
             pygame.mixer.music.stop()
             return
-        if isinstance(spec, dict):
-            path = spec.get("file") or spec.get("path", "")
-            volume = float(spec.get("volume", 1.0))
-        else:
-            path, volume = spec, 1.0
-        try:
-            p = Path(path)
-            if not p.is_absolute():
-                p = (self.base_dir / p).resolve()
-            pygame.mixer.music.load(str(p))
-            pygame.mixer.music.set_volume(max(0.0, min(1.0, volume)))
-            pygame.mixer.music.play(loops=-1)  # -1 = boucle infinie
-        except Exception as e:
-            print(f"[Music] {e}")
 
-    def _select_choice(self, idx):
-        choice = self.choices[idx]
-        for k, v in (choice.get("set") or {}).items():
-            self.variables[k] = v
-        # collect sub-actions, append goto as a synthetic action
-        sub = list(choice.get("actions") or [])
-        dest = choice.get("goto") or choice.get("jump")
-        if dest:
-            sub.append({"goto": dest})
-        self.executor.advance()  # move past the choice node
-        if sub:
-            self.executor.push(sub)
+        if isinstance(spec, dict):
+            path_value = (
+                spec.get("file")
+                or spec.get("path", "")
+            )
+
+            try:
+                volume = float(spec.get("volume", 1.0))
+            except (TypeError, ValueError):
+                volume = 1.0
+
+        else:
+            path_value = spec
+            volume = 1.0
+
+        try:
+            path = Path(path_value)
+
+            if not path.is_absolute():
+                path = (self.base_dir / path).resolve()
+
+            pygame.mixer.music.load(str(path))
+
+            pygame.mixer.music.set_volume(
+                max(0.0, min(1.0, volume))
+            )
+
+            # -1 signifie que la musique boucle indéfiniment.
+            pygame.mixer.music.play(loops=-1)
+
+        except Exception as error:
+            print(f"[Music] {error}")
+
+    # ------------------------------------------------------------------
+    # Choix
+    # ------------------------------------------------------------------
+
+    def _select_choice(self, index):
+        if not 0 <= index < len(self.choices):
+            return
+
+        choice = self.choices[index]
+
+        for key, value in (choice.get("set") or {}).items():
+            self.variables[key] = value
+
+        sub_actions = list(
+            choice.get("actions") or []
+        )
+
+        destination = (
+            choice.get("goto")
+            or choice.get("jump")
+        )
+
+        if destination:
+            sub_actions.append(
+                {"goto": destination}
+            )
+
+        # Passe le nœud de choix dans l'exécuteur principal.
+        self.executor.advance()
+
+        if sub_actions:
+            self.executor.push(sub_actions)
+
         self.choices = []
         self._choice_rects = []
         self.mode = "running"
 
     # ------------------------------------------------------------------
-    # Rendering
+    # Affichage
     # ------------------------------------------------------------------
 
     def _render(self):
         self.screen.fill((20, 20, 30))
-        dt = self.clock.get_time()
-        if self._bg_video:
-            self._bg_video_elapsed += dt
-            if self._bg_video_elapsed >= self._bg_video_ms:
-                self._bg_video_elapsed -= self._bg_video_ms
-                self._advance_video_frame()
-        elif self._bg_frames:
-            self._bg_frame_elapsed += dt
-            _, duration = self._bg_frames[self._bg_frame_idx]
-            if self._bg_frame_elapsed >= duration:
-                self._bg_frame_elapsed -= duration
-                self._bg_frame_idx = (self._bg_frame_idx + 1) % len(self._bg_frames)
-            self.current_bg = self._bg_frames[self._bg_frame_idx][0]
-        if self.current_bg:
-            self.screen.blit(self.current_bg, (0, 0))
-        for char in self.chars.all():
-            if not char.visible:
+
+        delta_time = self.clock.get_time()
+
+        self._update_animated_background(delta_time)
+
+        if self.current_bg is not None:
+            self.screen.blit(
+                self.current_bg,
+                (0, 0),
+            )
+
+        for character in self.chars.all():
+            if not character.visible:
                 continue
-            is_speaking = (char.id == self.current_speaker_id)
-            char.render(self.screen, is_speaking, dim_alpha=self.dim_opacity)
+
+            is_speaking = (
+                character.id == self.current_speaker_id
+            )
+
+            character.render(
+                self.screen,
+                is_speaking=is_speaking,
+                dim_amount=self.character_dim,
+            )
+
         self._render_dialogue_box()
+
         if self.mode == "choice":
             self._render_choices()
+
         pygame.display.flip()
+
+    def _update_animated_background(self, delta_time):
+        if self._bg_video is not None:
+            self._bg_video_elapsed += delta_time
+
+            # La boucle while évite de ralentir la vidéo si une image
+            # du jeu prend plus de temps que prévu.
+            while self._bg_video_elapsed >= self._bg_video_ms:
+                self._bg_video_elapsed -= self._bg_video_ms
+                self._advance_video_frame()
+
+        elif self._bg_frames:
+            self._bg_frame_elapsed += delta_time
+
+            _, duration = self._bg_frames[self._bg_frame_idx]
+
+            while self._bg_frame_elapsed >= duration:
+                self._bg_frame_elapsed -= duration
+
+                self._bg_frame_idx = (
+                    self._bg_frame_idx + 1
+                ) % len(self._bg_frames)
+
+                _, duration = self._bg_frames[self._bg_frame_idx]
+
+            self.current_bg = self._bg_frames[
+                self._bg_frame_idx
+            ][0]
 
     def _render_dialogue_box(self):
         box_y = self.H - self._DLGBOX_H
-        box_surf = pygame.Surface((self.W, self._DLGBOX_H), pygame.SRCALPHA)
-        box_surf.fill(self._DLGBOX_COLOR)
-        self.screen.blit(box_surf, (0, box_y))
-        pad = 30
+
+        box_surface = pygame.Surface(
+            (self.W, self._DLGBOX_H),
+            pygame.SRCALPHA,
+        )
+
+        box_surface.fill(self._DLGBOX_COLOR)
+
+        self.screen.blit(
+            box_surface,
+            (0, box_y),
+        )
+
+        padding = 30
         y = box_y + 14
+
         if self.current_speaker_name:
-            surf = self.font_speaker.render(str(self.current_speaker_name), True, self._SPEAKER_COLOR)
-            self.screen.blit(surf, (pad, y))
-            y += surf.get_height() + 8
+            speaker_surface = self.font_speaker.render(
+                str(self.current_speaker_name),
+                True,
+                self._SPEAKER_COLOR,
+            )
+
+            self.screen.blit(
+                speaker_surface,
+                (padding, y),
+            )
+
+            y += speaker_surface.get_height() + 8
+
         if self.current_text:
-            self._draw_text_wrapped(self.current_text, pad, y, self.font_text,
-                                    self._TEXT_COLOR, self.W - pad * 2)
+            self._draw_text_wrapped(
+                text=self.current_text,
+                x=padding,
+                y=y,
+                font=self.font_text,
+                color=self._TEXT_COLOR,
+                max_width=self.W - padding * 2,
+            )
 
     def _render_choices(self):
         self._choice_rects = []
-        cy = int(self.H * 0.42)
-        pad_x = 60
-        bg_pad = 8
-        mouse = pygame.mouse.get_pos()
-        line_h = self.font_choice.get_linesize()
-        for i, c in enumerate(self.choices):
-            txt = f"{i + 1}.  {c.get('text', '')}"
-            hit = pygame.Rect(pad_x - bg_pad, cy - bg_pad,
-                              self.W - pad_x * 2, line_h + bg_pad * 2)
-            self._choice_rects.append(hit)
-            color = self._CHOICE_COLOR
-            if hit.collidepoint(mouse):
-                hl = pygame.Surface(hit.size, pygame.SRCALPHA)
-                hl.fill((255, 255, 100, 40))
-                self.screen.blit(hl, hit)
-                color = self._CHOICE_HOVER
-            self.screen.blit(self.font_choice.render(txt, True, color), (pad_x, cy))
-            cy += line_h + 14
 
-    def _draw_text_wrapped(self, text, x, y, font, color, max_width):
-        line = ""
-        for word in text.split():
-            test = line + (" " if line else "") + word
-            if font.render(test, True, color).get_width() <= max_width:
-                line = test
-            else:
-                self.screen.blit(font.render(line, True, color), (x, y))
+        current_y = int(self.H * 0.42)
+        padding_x = 60
+        background_padding = 8
+
+        mouse_position = pygame.mouse.get_pos()
+        line_height = self.font_choice.get_linesize()
+
+        for index, choice in enumerate(self.choices):
+            text = (
+                f"{index + 1}.  "
+                f"{choice.get('text', '')}"
+            )
+
+            hit_rect = pygame.Rect(
+                padding_x - background_padding,
+                current_y - background_padding,
+                self.W - padding_x * 2,
+                line_height + background_padding * 2,
+            )
+
+            self._choice_rects.append(hit_rect)
+
+            color = self._CHOICE_COLOR
+
+            if hit_rect.collidepoint(mouse_position):
+                highlight = pygame.Surface(
+                    hit_rect.size,
+                    pygame.SRCALPHA,
+                )
+
+                highlight.fill(
+                    (255, 255, 100, 40)
+                )
+
+                self.screen.blit(
+                    highlight,
+                    hit_rect,
+                )
+
+                color = self._CHOICE_HOVER
+
+            choice_surface = self.font_choice.render(
+                text,
+                True,
+                color,
+            )
+
+            self.screen.blit(
+                choice_surface,
+                (padding_x, current_y),
+            )
+
+            current_y += line_height + 14
+
+    def _draw_text_wrapped(
+        self,
+        text,
+        x,
+        y,
+        font,
+        color,
+        max_width,
+    ):
+        current_line = ""
+
+        for word in str(text).split():
+            candidate_line = (
+                current_line + (" " if current_line else "") + word
+            )
+
+            candidate_width = font.render(
+                candidate_line,
+                True,
+                color,
+            ).get_width()
+
+            if candidate_width <= max_width:
+                current_line = candidate_line
+                continue
+
+            if current_line:
+                line_surface = font.render(
+                    current_line,
+                    True,
+                    color,
+                )
+
+                self.screen.blit(
+                    line_surface,
+                    (x, y),
+                )
+
                 y += font.get_linesize() + 2
-                line = word
-        if line:
-            self.screen.blit(font.render(line, True, color), (x, y))
+
+            current_line = word
+
+        if current_line:
+            line_surface = font.render(
+                current_line,
+                True,
+                color,
+            )
+
+            self.screen.blit(
+                line_surface,
+                (x, y),
+            )
