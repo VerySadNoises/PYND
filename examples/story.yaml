@@ -2,17 +2,18 @@
 characters:
   settler:
     name: Settler
-    image: C:\Users\nklayer\OneDrive - Digicorner\Documents\Space_visual_novel\assets\characters\Settler.jpg
+    image: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\characters\Settler2.png
     position: left
   captain:
     name: Capitaine
-    image: C:\Users\nklayer\OneDrive - Digicorner\Documents\Space_visual_novel\assets\characters\Pilot.jpg
+    image: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\characters\Pilot2.png
     position: right
 
 scenes:
   - id: intro
-    background: C:\Users\nklayer\OneDrive - Digicorner\Documents\Space_visual_novel\assets\bg\bg_spaceship.jpg
-    dim_opacity: 160
+    music : C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\audio\Forgotten Biomes.ogg
+    background: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\bg\bg_spaceship.jpg
+    dim_opacity: 0
     characters: [settler, captain]
     actions:
       - settler: "Welcome travelers! Are you ready for the journey?"
@@ -31,8 +32,9 @@ scenes:
             goto: stay_scene
 
   - id: explore
-    background: C:\Users\nklayer\OneDrive - Digicorner\Documents\Space_visual_novel\assets\bg\bg_spaceship.jpg
-    dim_opacity: 160
+    music : C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\audio\Drifting Memories.ogg
+    background: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\bg\bg_spaceship.jpg
+    dim_opacity: 0
     characters: [settler, captain]
     actions:
       - captain: "Engines are online. We're heading out!"
@@ -40,8 +42,8 @@ scenes:
       - captain: "Then let us begin."
 
   - id: stay_scene
-    background: C:\Users\nklayer\OneDrive - Digicorner\Documents\Space_visual_novel\assets\bg\bg_spaceship.jpg
-    dim_opacity: 160
+    background: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\bg\bg_spaceship.jpg
+    dim_opacity: 0
     characters: [captain]
     actions:
       - captain: "You chose to stay. The ship departs without you."
