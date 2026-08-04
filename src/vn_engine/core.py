@@ -5,6 +5,8 @@ from vn_engine.script_parser import load_story
 from vn_engine.characters import CharacterRegistry
 from vn_engine.dialogue import ActionExecutor
 
+_VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
+
 
 class SaveManager:
     def __init__(self, save_dir="saves"):
@@ -32,6 +34,7 @@ class VNApp:
 
     def __init__(self, story_path, width=1280, height=720):
         pygame.init()
+        pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
         self.W, self.H = width, height
         self.screen = pygame.display.set_mode((self.W, self.H))
         pygame.display.set_caption("VN Engine")
@@ -49,6 +52,15 @@ class VNApp:
         self.save_manager = SaveManager()
         self.executor = ActionExecutor()
         self.current_bg = None
+        # animated GIF: list of (surface, duration_ms)
+        self._bg_frames = None
+        self._bg_frame_idx = 0
+        self._bg_frame_elapsed = 0
+        # video playback via OpenCV + optional audio via ffpyplayer
+        self._bg_video = None
+        self._bg_video_ms = 0.0
+        self._bg_video_elapsed = 0
+        self._bg_audio = None
         self.dim_opacity = 160
         self.current_speaker_id = None
         self.current_speaker_name = ""
@@ -71,6 +83,7 @@ class VNApp:
             self.running = False
             return
         self._load_background(scene.get("background"))
+        self._play_music(scene.get("music"))
         self.dim_opacity = scene.get("dim_opacity", 160)
         self.chars.hide_all()
         for entry in (scene.get("characters") or []):
@@ -83,19 +96,102 @@ class VNApp:
         self.executor.load(scene.get("actions", []))
         self.mode = "running"
 
-    def _load_background(self, bg_path):
-        if not bg_path:
-            self.current_bg = None
+    def _load_background(self, bg_spec):
+        if self._bg_video:
+            self._bg_video.release()
+        if self._bg_audio:
+            try:
+                self._bg_audio.close_player()
+            except Exception:
+                pass
+        self.current_bg = None
+        self._bg_frames = None
+        self._bg_frame_idx = 0
+        self._bg_frame_elapsed = 0
+        self._bg_video = None
+        self._bg_video_elapsed = 0
+        self._bg_audio = None
+        if not bg_spec:
             return
+        # accept either a plain path string or {file: ..., audio: true/false}
+        if isinstance(bg_spec, dict):
+            bg_path = bg_spec.get("file") or bg_spec.get("path", "")
+            audio = bg_spec.get("audio", False)
+        else:
+            bg_path = bg_spec
+            audio = False
         try:
             p = Path(bg_path)
             if not p.is_absolute():
                 p = (self.base_dir / p).resolve()
-            surf = pygame.image.load(str(p)).convert()
-            self.current_bg = pygame.transform.scale(surf, (self.W, self.H))
+            ext = p.suffix.lower()
+            if ext in _VIDEO_EXTS:
+                self._open_video(p, audio=audio)
+            elif ext == ".gif":
+                self._bg_frames = self._load_gif_frames(p)
+                if self._bg_frames:
+                    self.current_bg = self._bg_frames[0][0]
+            else:
+                surf = pygame.image.load(str(p)).convert()
+                self.current_bg = pygame.transform.scale(surf, (self.W, self.H))
         except Exception as e:
             print(f"[BG] {e}")
-            self.current_bg = None
+
+    def _open_video(self, path, audio=False):
+        try:
+            import cv2
+        except ImportError:
+            print("[BG] pip install opencv-python pour utiliser des vidéos")
+            return
+        cap = cv2.VideoCapture(str(path))
+        if not cap.isOpened():
+            print(f"[BG] Impossible d'ouvrir la vidéo: {path}")
+            return
+        fps = cap.get(cv2.CAP_PROP_FPS) or 24
+        self._bg_video = cap
+        self._bg_video_ms = 1000.0 / fps
+        if audio:
+            try:
+                from ffpyplayer.player import MediaPlayer
+                # vn=1 disables ffpyplayer's own video decoding (we use OpenCV)
+                self._bg_audio = MediaPlayer(str(path), ff_opts={"vn": False, "an": False})
+            except ImportError:
+                print("[BG] pip install ffpyplayer pour l'audio des vidéos")
+            except Exception as e:
+                print(f"[BG] Audio init error: {e}")
+        self._advance_video_frame()
+
+    def _advance_video_frame(self):
+        import cv2
+        ok, frame = self._bg_video.read()
+        if not ok:
+            self._bg_video.set(cv2.CAP_PROP_POS_FRAMES, 0)  # loop
+            ok, frame = self._bg_video.read()
+        if ok:
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w = frame_rgb.shape[:2]
+            surf = pygame.image.frombuffer(frame_rgb.tobytes(), (w, h), "RGB").convert()
+            self.current_bg = pygame.transform.scale(surf, (self.W, self.H))
+
+    def _load_gif_frames(self, path):
+        """Return list of (surface, duration_ms) for each GIF frame."""
+        try:
+            from PIL import Image
+        except ImportError:
+            print("[BG] Install Pillow to use animated GIFs: pip install Pillow")
+            return None
+        frames = []
+        with Image.open(path) as img:
+            for i in range(getattr(img, 'n_frames', 1)):
+                img.seek(i)
+                duration = img.info.get("duration", 100)  # ms per frame
+                frame_rgba = img.convert("RGBA")
+                raw = frame_rgba.tobytes()
+                size = frame_rgba.size
+                surf = pygame.image.fromstring(raw, size, "RGBA").convert_alpha()
+                surf = pygame.transform.scale(surf, (self.W, self.H))
+                frames.append((surf, max(duration, 20)))
+        return frames if frames else None
 
     # ------------------------------------------------------------------
     # Main loop
@@ -196,8 +292,31 @@ class VNApp:
             self._load_background(action["background"])
             self.executor.advance()
 
+        elif "music" in action:
+            self._play_music(action["music"])
+            self.executor.advance()
+
         else:
             self.executor.advance()
+
+    def _play_music(self, spec):
+        if not spec or spec in ("stop", "none", False):
+            pygame.mixer.music.stop()
+            return
+        if isinstance(spec, dict):
+            path = spec.get("file") or spec.get("path", "")
+            volume = float(spec.get("volume", 1.0))
+        else:
+            path, volume = spec, 1.0
+        try:
+            p = Path(path)
+            if not p.is_absolute():
+                p = (self.base_dir / p).resolve()
+            pygame.mixer.music.load(str(p))
+            pygame.mixer.music.set_volume(max(0.0, min(1.0, volume)))
+            pygame.mixer.music.play(loops=-1)  # -1 = boucle infinie
+        except Exception as e:
+            print(f"[Music] {e}")
 
     def _select_choice(self, idx):
         choice = self.choices[idx]
@@ -221,6 +340,19 @@ class VNApp:
 
     def _render(self):
         self.screen.fill((20, 20, 30))
+        dt = self.clock.get_time()
+        if self._bg_video:
+            self._bg_video_elapsed += dt
+            if self._bg_video_elapsed >= self._bg_video_ms:
+                self._bg_video_elapsed -= self._bg_video_ms
+                self._advance_video_frame()
+        elif self._bg_frames:
+            self._bg_frame_elapsed += dt
+            _, duration = self._bg_frames[self._bg_frame_idx]
+            if self._bg_frame_elapsed >= duration:
+                self._bg_frame_elapsed -= duration
+                self._bg_frame_idx = (self._bg_frame_idx + 1) % len(self._bg_frames)
+            self.current_bg = self._bg_frames[self._bg_frame_idx][0]
         if self.current_bg:
             self.screen.blit(self.current_bg, (0, 0))
         for char in self.chars.all():
