@@ -40,4 +40,4 @@ Fichiers importants créés:
 - `examples/story.yaml` : script d'exemple
 - `requirements.txt` : dépendances
 
-Prochaine étape: j'ai créé le scaffold initial. Voulez-vous que je complète le parseur, ajoute la validation et étende le runtime (choix, sauvegardes) maintenant ?
+Prochaine étape: j'ai créé le scaffold initial. Voulez-vous que je complète le parseur, ajoute la validation et étende le runtime (choix, sauvegardes et variables) maintenant ?
