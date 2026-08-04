@@ -1,0 +1,47 @@
+# Characters defined once; referenced by id in all scenes.
+characters:
+  settler:
+    name: Settler
+    image: C:\Users\nklayer\OneDrive - Digicorner\Documents\Space_visual_novel\assets\characters\Settler.jpg
+    position: left
+  captain:
+    name: Capitaine
+    image: C:\Users\nklayer\OneDrive - Digicorner\Documents\Space_visual_novel\assets\characters\Pilot.jpg
+    position: right
+
+scenes:
+  - id: intro
+    background: C:\Users\nklayer\OneDrive - Digicorner\Documents\Space_visual_novel\assets\bg\bg_spaceship.jpg
+    dim_opacity: 160
+    characters: [settler, captain]
+    actions:
+      - settler: "Welcome travelers! Are you ready for the journey?"
+      - captain: "We depart at dawn. Have you made your decision?"
+      - choice:
+          - text: "Explorer"
+            actions:
+              - settler: "Excellent! Prepare yourself."
+              - captain: "I'll set the course."
+            goto: explore
+          - text: "Rester"
+            actions:
+              - captain: "As you wish. Stay then."
+            set:
+              stayed: true
+            goto: stay_scene
+
+  - id: explore
+    background: C:\Users\nklayer\OneDrive - Digicorner\Documents\Space_visual_novel\assets\bg\bg_spaceship.jpg
+    dim_opacity: 160
+    characters: [settler, captain]
+    actions:
+      - captain: "Engines are online. We're heading out!"
+      - settler: "I'll chart the stars."
+      - captain: "Then let us begin."
+
+  - id: stay_scene
+    background: C:\Users\nklayer\OneDrive - Digicorner\Documents\Space_visual_novel\assets\bg\bg_spaceship.jpg
+    dim_opacity: 160
+    characters: [captain]
+    actions:
+      - captain: "You chose to stay. The ship departs without you."
