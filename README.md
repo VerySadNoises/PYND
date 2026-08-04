@@ -1,4 +1,4 @@
-# PYND
+# D.S.E
 
 Ce dépôt contient un prototype minimal d'un moteur de Visual Novel en Python (MVP).
 
