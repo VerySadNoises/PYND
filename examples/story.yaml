@@ -2,18 +2,18 @@
 characters:
   settler:
     name: Settler
-    image: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\characters\Settler2.png
+    image: assets/characters/Settler2.png
     position: left
 
   captain:
     name: Capitaine
-    image: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\characters\Pilot2.png
+    image: assets/characters/Pilot2.png
     position: right
 
 scenes:
   - id: intro
-    music: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\audio\Forgotten Biomes.ogg
-    background: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\bg\bg_spaceship.jpg
+    music: assets/audio/Forgotten Biomes.ogg
+    background: assets/bg/bg_spaceship.jpg
 
     # 0 = aucun assombrissement
     # 255 = personnage entièrement noir
@@ -42,8 +42,8 @@ scenes:
             goto: stay_scene
 
   - id: explore
-    music: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\audio\Drifting Memories.ogg
-    background: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\bg\bg_spaceship.jpg
+    music: assets/audio/Drifting Memories.ogg
+    background: assets/bg/bg_spaceship.jpg
     character_dim: 120
 
     characters:
@@ -56,7 +56,7 @@ scenes:
       - captain: "Then let us begin."
 
   - id: stay_scene
-    background: C:\Users\klaye\Desktop\Game\M.O.E\PYND\assets\bg\bg_spaceship.jpg
+    background: assets/bg/bg_spaceship.jpg
     character_dim: 120
 
     characters:

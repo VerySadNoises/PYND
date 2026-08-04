@@ -40,7 +40,7 @@ scenes:
   - id: intro              # identifiant unique (utilisé par goto)
     background: ...        # fond (image, GIF, vidéo) — optionnel
     music: ...             # musique de fond en boucle — optionnel
-    dim_opacity: 160       # opacité du filtre grisé sur les non-parlants (0–255)
+    character_dim: 120      # 0 = aucun assombrissement # 255 = personnage entièrement noir
     characters:            # personnages à afficher au chargement de la scène
       - settler
       - captain
