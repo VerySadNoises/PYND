@@ -652,13 +652,67 @@ Applique un effet visuel à un personnage. Bloquant par défaut (`wait: true`).
 
 ### Animations disponibles
 
+#### Entrée / sortie
+
 | Nom | Paramètres | Effet |
 |---|---|---|
-| `shake` | `intensity` (px, défaut 12) | Tremblement qui s'atténue |
-| `scale_up` | `scale` (facteur, défaut 1.15) | Gonflement pulsé |
+| `slide_in` | `dx`, `dy` (px, défaut 80/0) | Glissement depuis un décalage vers la position finale |
+| `slide_out` | `dx`, `dy` (px, défaut 80/0) | Glissement vers un décalage — sortie de scène |
+| `fade_in` | — | Apparition progressive depuis transparent |
+| `fade_out` | — | Disparition progressive vers transparent |
+| `zoom_in` | `start_scale` (défaut 0.3) | Zoom depuis petite taille jusqu'à la normale |
+| `zoom_out` | `end_scale` (défaut 0.3) | Rétrécissement jusqu'à disparaître |
+
+#### Emphase
+
+| Nom | Paramètres | Effet |
+|---|---|---|
+| `shake` | `intensity` (px, défaut 12) | Tremblement aléatoire qui s'atténue |
 | `bounce` | `height` (px, défaut 30) | Saut parabolique |
-| `translate` | `dx`, `dy` (px, défaut 0/-20) | Nudge et retour |
-| `slide_in` | `dx`, `dy` (px, défaut 80/0) | Glissement d'entrée |
+| `scale_up` | `scale` (facteur, défaut 1.15) | Gonflement pulsé |
+| `translate` | `dx`, `dy` (px, défaut 0/-20) | Nudge et retour à la position initiale |
+| `swing` | `angle` (°, défaut 15), `oscillations` (défaut 2.5) | Oscillation pendulaire qui s'atténue |
+| `flash` | `intensity` (0-255, défaut 200) | Éclair blanc bref (choc, révélation) |
+
+#### Ambiance
+
+| Nom | Paramètres | Effet |
+|---|---|---|
+| `hover` | `height` (px, défaut 12), `cycles` (défaut 1.0) | Flottement sinusoïdal continu |
+
+#### Exemples
+
+```yaml
+# Entrée dramatique : zoom + fondu enchaîné
+- animate:
+    id: alien
+    name: zoom_in
+    duration: 600
+    start_scale: 0.1
+    blocking: true
+
+# Réaction à un choc
+- animate:
+    id: captain
+    name: flash
+    duration: 300
+
+# Oscillation sur un personnage mystérieux
+- animate:
+    id: fantome
+    name: swing
+    duration: 800
+    angle: 20
+    oscillations: 3.0
+
+# Sortie de scène vers la droite
+- animate:
+    id: settler
+    name: slide_out
+    duration: 500
+    dx: 120
+    blocking: true
+```
 
 ### Ajouter une animation personnalisée
 

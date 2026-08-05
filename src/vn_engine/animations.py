@@ -15,6 +15,7 @@ Pour ajouter une animation personnalisée :
             return rotated, new_rect
 """
 
+import math
 import random
 import pygame
 
@@ -139,10 +140,7 @@ class Translate(BaseAnimation):
 
 @register("slide_in")
 class SlideIn(BaseAnimation):
-    """
-    Glissement depuis un décalage initial (dx, dy) vers la position finale.
-    Utile pour faire entrer un personnage en douceur.
-    """
+    """Glissement depuis un décalage initial (dx, dy) vers la position finale."""
 
     def __init__(self, duration_ms: int = 500, dx: int = 80, dy: int = 0):
         super().__init__(duration_ms)
@@ -150,10 +148,128 @@ class SlideIn(BaseAnimation):
         self.dy = int(dy)
 
     def get_transform(self, rect, surf):
-        # Smooth-step : accélération douce au départ et à l'arrivée
         t = self.progress
-        ease = t * t * (3.0 - 2.0 * t)
+        ease = t * t * (3.0 - 2.0 * t)  # smooth-step
         return surf, rect.move(
             int(self.dx * (1.0 - ease)),
             int(self.dy * (1.0 - ease)),
         )
+
+
+@register("slide_out")
+class SlideOut(BaseAnimation):
+    """Glissement vers un décalage final (dx, dy) — animation de sortie."""
+
+    def __init__(self, duration_ms: int = 500, dx: int = 80, dy: int = 0):
+        super().__init__(duration_ms)
+        self.dx = int(dx)
+        self.dy = int(dy)
+
+    def get_transform(self, rect, surf):
+        t = self.progress
+        ease = t * t * (3.0 - 2.0 * t)
+        return surf, rect.move(int(self.dx * ease), int(self.dy * ease))
+
+
+@register("fade_in")
+class FadeIn(BaseAnimation):
+    """Apparition progressive depuis transparent vers opaque."""
+
+    def get_transform(self, rect, surf):
+        copy = surf.copy()
+        copy.fill((255, 255, 255, int(255 * self.progress)), special_flags=pygame.BLEND_RGBA_MULT)
+        return copy, rect
+
+
+@register("fade_out")
+class FadeOut(BaseAnimation):
+    """Disparition progressive depuis opaque vers transparent."""
+
+    def get_transform(self, rect, surf):
+        copy = surf.copy()
+        copy.fill((255, 255, 255, int(255 * (1.0 - self.progress))), special_flags=pygame.BLEND_RGBA_MULT)
+        return copy, rect
+
+
+@register("zoom_in")
+class ZoomIn(BaseAnimation):
+    """Entrée dramatique : zoom depuis `start_scale` vers la taille normale."""
+
+    def __init__(self, duration_ms: int = 500, start_scale: float = 0.3):
+        super().__init__(duration_ms)
+        self.start_scale = float(start_scale)
+
+    def get_transform(self, rect, surf):
+        t = self.progress
+        ease = t * t * (3.0 - 2.0 * t)
+        s = self.start_scale + (1.0 - self.start_scale) * ease
+        new_w = max(1, int(surf.get_width() * s))
+        new_h = max(1, int(surf.get_height() * s))
+        scaled = pygame.transform.smoothscale(surf, (new_w, new_h))
+        return scaled, scaled.get_rect(center=rect.center)
+
+
+@register("zoom_out")
+class ZoomOut(BaseAnimation):
+    """Sortie : rétrécissement depuis la taille normale vers `end_scale`."""
+
+    def __init__(self, duration_ms: int = 500, end_scale: float = 0.3):
+        super().__init__(duration_ms)
+        self.end_scale = float(end_scale)
+
+    def get_transform(self, rect, surf):
+        t = self.progress
+        ease = t * t * (3.0 - 2.0 * t)
+        s = 1.0 - (1.0 - self.end_scale) * ease
+        new_w = max(1, int(surf.get_width() * s))
+        new_h = max(1, int(surf.get_height() * s))
+        scaled = pygame.transform.smoothscale(surf, (new_w, new_h))
+        return scaled, scaled.get_rect(center=rect.center)
+
+
+@register("swing")
+class Swing(BaseAnimation):
+    """Oscillation pendulaire qui s'atténue — pour l'emphase ou la surprise."""
+
+    def __init__(self, duration_ms: int = 600, angle: float = 15.0, oscillations: float = 2.5):
+        super().__init__(duration_ms)
+        self.angle = float(angle)
+        self.oscillations = float(oscillations)
+
+    def get_transform(self, rect, surf):
+        fade = 1.0 - self.progress
+        a = math.sin(self.progress * math.pi * 2 * self.oscillations) * self.angle * fade
+        rotated = pygame.transform.rotate(surf, a)
+        return rotated, rotated.get_rect(center=rect.center)
+
+
+@register("flash")
+class Flash(BaseAnimation):
+    """Éclair blanc bref — réaction à un choc, une révélation, une attaque."""
+
+    def __init__(self, duration_ms: int = 300, intensity: int = 200):
+        super().__init__(duration_ms)
+        self.intensity = min(255, int(intensity))
+
+    def get_transform(self, rect, surf):
+        envelope = 4 * self.progress * (1.0 - self.progress)
+        alpha = int(self.intensity * envelope)
+        if alpha <= 0:
+            return surf, rect
+        copy = surf.copy()
+        copy.fill((alpha, alpha, alpha, 0), special_flags=pygame.BLEND_RGB_ADD)
+        return copy, rect
+
+
+@register("hover")
+class Hover(BaseAnimation):
+    """Flottement sinusoïdal continu — pour les personnages éthérés ou fantomatiques."""
+
+    def __init__(self, duration_ms: int = 1200, height: int = 12, cycles: float = 1.0):
+        super().__init__(duration_ms)
+        self.height = int(height)
+        self.cycles = float(cycles)
+
+    def get_transform(self, rect, surf):
+        dy = math.sin(self.progress * math.pi * 2 * self.cycles) * self.height
+        return surf, rect.move(0, int(dy))
