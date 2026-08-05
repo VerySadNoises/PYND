@@ -1,0 +1,207 @@
+# ============================================================
+#  Exemple avancé — Station Kepler-7
+#  Illustre : variables, calculs, if/else, choix conditionnels,
+#             interpolation dans les dialogues, sauvegarde F5/F9
+# ============================================================
+
+characters:
+  pilot:
+    name: Pilote
+    image: assets/characters/Pilot2.png
+    position: right
+
+  settler:
+    name: Settler
+    image: assets/characters/Settler2.png
+    position: left
+
+# ============================================================
+scenes:
+
+  # ----------------------------------------------------------
+  # Scène 1 : Arrivée — initialisation des variables globales
+  # ----------------------------------------------------------
+  - id: arrivee
+    background: assets/bg/bg_spaceship.jpg
+    music: assets/audio/Forgotten Biomes.ogg
+    character_dim: 100
+
+    characters:
+      - settler
+      - pilot
+
+    actions:
+      # Initialisation de toutes les variables du joueur
+      - set:
+          credits: 200
+          reputation: 5
+          has_permit: false
+          trades_done: 0
+          player_name: Voyageur
+
+      - settler: "Bienvenue à la Station Kepler-7, {player_name}."
+      - pilot: "Vous avez {credits} crédits à bord. Choisissez bien vos actions."
+
+      - choice:
+          - text: "Payer les frais d'amarrage (20 crédits)"
+            set:
+              credits: "credits - 20"
+              reputation: "reputation + 1"
+            actions:
+              - settler: "Merci. Votre réputation monte à {reputation}/10."
+            goto: marche
+
+          - text: "Tenter d'éviter les frais"
+            set:
+              reputation: "reputation - 2"
+            actions:
+              - pilot: "Les autorités notent l'incident. Réputation : {reputation}/10."
+            goto: marche
+
+  # ----------------------------------------------------------
+  # Scène 2 : Le marché
+  # ----------------------------------------------------------
+  - id: marche
+    background: assets/bg/bg_spaceship.jpg
+    music: assets/audio/Drifting Memories.ogg
+    character_dim: 120
+
+    characters:
+      - settler
+      - pilot
+
+    actions:
+      - settler: "Le marché est ouvert. Vous avez {credits} crédits."
+
+      # Dialogue conditionnel selon la réputation actuelle
+      - if:
+          condition: "reputation >= 5"
+          then:
+            - pilot: "Votre réputation ({reputation}/10) vous ouvre des portes ici."
+          else:
+            - pilot: "Attention — avec {reputation}/10, peu de marchands vous feront confiance."
+
+      - choice:
+          - text: "Acheter un permis commercial (50 crédits)"
+            condition: "credits >= 50"
+            set:
+              credits: "credits - 50"
+              has_permit: true
+            actions:
+              - settler: "Permis enregistré. Il vous reste {credits} crédits."
+
+          - text: "Vendre des marchandises (+80 crédits)"
+            set:
+              credits: "credits + 80"
+              trades_done: "trades_done + 1"
+            actions:
+              - settler: "Transaction réussie ! Solde : {credits} crédits."
+              - pilot: "C'est votre {trades_done}e échange ici."
+
+          - text: "Négocier une remise (réputation requise : 6)"
+            condition: "reputation >= 6"
+            set:
+              credits: "credits + 40"
+              reputation: "reputation + 1"
+            actions:
+              - settler: "Votre réputation parle pour vous. +40 crédits, réputation : {reputation}/10."
+
+          - text: "Passer à la douane"
+            goto: douane
+
+  # ----------------------------------------------------------
+  # Scène 3 : La douane
+  # ----------------------------------------------------------
+  - id: douane
+    background: assets/bg/bg_spaceship.jpg
+    character_dim: 80
+
+    characters:
+      - pilot
+      - settler
+
+    actions:
+      - pilot: "Agent de douane. Vos papiers, {player_name}."
+
+      # Branche principale selon le permis
+      - if:
+          condition: "has_permit"
+          then:
+            - settler: "Permis valide. Solde vérifié : {credits} crédits. Bonne route."
+          else:
+            - pilot: "Aucun permis détecté. Vous allez devoir payer une amende."
+
+      # Amende si pas de permis
+      - if:
+          condition: "not has_permit"
+          then:
+            - choice:
+                - text: "Payer l'amende (30 crédits)"
+                  condition: "credits >= 30"
+                  set:
+                    credits: "credits - 30"
+                    reputation: "reputation - 1"
+                  actions:
+                    - pilot: "Amende réglée. Il vous reste {credits} crédits."
+
+                - text: "Contester (réputation >= 7)"
+                  condition: "reputation >= 7"
+                  set:
+                    reputation: "reputation - 1"
+                  actions:
+                    - settler: "L'agent hésite… et vous laisse passer. Réputation : {reputation}/10."
+
+                - text: "Fuir vers le vaisseau"
+                  set:
+                    reputation: "reputation - 3"
+                  actions:
+                    - pilot: "Alerte lancée ! Réputation effondrée : {reputation}/10."
+
+      # Évaluation finale
+      - if:
+          condition: "credits >= 150 and reputation >= 6"
+          then:
+            - goto: fin_bonne
+          else:
+            - goto: fin_difficile
+
+  # ----------------------------------------------------------
+  # Scène 4a : Fin bonne
+  # ----------------------------------------------------------
+  - id: fin_bonne
+    background: assets/bg/bg_spaceship.jpg
+    music: assets/audio/Drifting Memories.ogg
+    character_dim: 60
+
+    characters:
+      - settler
+      - pilot
+
+    actions:
+      - settler: "Félicitations, {player_name} !"
+      - pilot: >
+          Vous quittez Kepler-7 avec {credits} crédits
+          et une réputation de {reputation}/10.
+      - settler: "Les étoiles vous appartiennent."
+
+  # ----------------------------------------------------------
+  # Scène 4b : Fin difficile
+  # ----------------------------------------------------------
+  - id: fin_difficile
+    background: assets/bg/bg_spaceship.jpg
+    character_dim: 180
+
+    characters:
+      - pilot
+
+    actions:
+      - if:
+          condition: "credits < 50"
+          then:
+            - pilot: "Ruiné. Il ne vous reste que {credits} crédits."
+          else:
+            - pilot: "Votre réputation ({reputation}/10) vous ferme trop de portes."
+      - pilot: >
+          Vous repartez de Kepler-7 marqué par vos choix.
+          {credits} crédits, {reputation}/10 de réputation.
+          Peut-être la prochaine station sera-t-elle plus clémente.

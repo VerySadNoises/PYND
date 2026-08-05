@@ -248,6 +248,18 @@ class CharacterRegistry:
         for character in self._chars.values():
             character.hide()
 
+    def register(self, char_id, config, base_dir):
+        """Ajoute un personnage depuis un autre fichier YAML (ignoré si l'id existe déjà)."""
+        if char_id in self._chars:
+            return
+        self._chars[char_id] = Character(
+            char_id=char_id,
+            name=config.get("name", char_id),
+            image_path=config.get("image"),
+            position=config.get("position", "center"),
+            base_dir=base_dir,
+        )
+
     def resolve_speaker(self, speaker_name):
         """
         Retourne l'identifiant correspondant à l'identifiant ou au nom

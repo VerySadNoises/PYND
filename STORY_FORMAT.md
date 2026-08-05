@@ -359,6 +359,83 @@ Les fichiers de sauvegarde sont au format JSON dans le dossier `saves/`.
 
 ---
 
+## Naviguer entre plusieurs fichiers YAML
+
+Divisez votre histoire en autant de fichiers que vous voulez. Un `goto` peut
+pointer vers une scène d'un autre fichier — le moteur le charge à la volée.
+
+### Syntaxe
+
+```yaml
+# Forme courte : fichier#scene  (recommandée)
+- goto: "chapter2.yaml#foret"
+
+# Forme dict : explicite
+- goto:
+    file: chapter2.yaml
+    scene: foret
+
+# Sans préciser la scène → première scène du fichier
+- goto: "chapter2.yaml"
+
+# Dans un choix
+- choice:
+    - text: "Continuer au chapitre 2"
+      goto: "chapter2.yaml#intro"
+    - text: "Rester ici"
+      goto: scene_locale
+```
+
+> Les chemins sont relatifs au répertoire du fichier lancé avec la CLI
+> (ex. `examples/` si vous lancez `python tools/cli.py run examples/chapter1.yaml`).
+
+### Ce qui se passe au moment du goto
+
+1. Le fichier YAML cible est lu et **fusionné** dans la partie en cours :
+   - Ses scènes s'ajoutent au pool de scènes disponibles.
+   - Ses personnages s'enregistrent (un personnage déjà connu par son `id` est ignoré — pas d'écrasement).
+2. Le moteur saute dans la scène demandée exactement comme pour un `goto` normal.
+3. Un fichier déjà chargé **ne sera pas relu** si un autre `goto` pointe à nouveau vers lui.
+
+### Variables entre fichiers
+
+Les variables (`set`) sont **globales à la partie**, pas au fichier. Tout ce
+qui a été défini dans `chapter1.yaml` est directement accessible dans
+`chapter2.yaml` sans aucune action supplémentaire.
+
+```yaml
+# chapter1.yaml — définit les variables
+- set:
+    player_name: Zara
+    credits: 120
+
+# chapter2.yaml — les utilise directement
+- captain: "Bienvenue, {player_name}. Solde : {credits} crédits."
+```
+
+### Lancer un chapitre seul (sans le précédent)
+
+Si `chapter2.yaml` est lancé directement, les variables du chapitre 1
+n'existent pas. Utilisez un `if` pour initialiser des valeurs par défaut :
+
+```yaml
+# En début de première scène de chapter2.yaml
+- if:
+    condition: "not player_name"
+    then:
+      - set:
+          player_name: Inconnu
+          credits: 80
+```
+
+### Sauvegarde F5 / F9
+
+La liste des fichiers extra chargés est incluse dans la sauvegarde.
+Au chargement F9, ils sont rechargés automatiquement avant de restaurer
+la scène — la partie reprend exactement dans le même état.
+
+---
+
 ## Changer le fond en cours de scène
 
 ```yaml
@@ -506,3 +583,4 @@ scenes:
 .venv\Scripts\Activate.ps1
 python tools/cli.py run examples/story.yaml
 ```
+

@@ -239,6 +239,11 @@ class VNApp:
 
         self.scenes = story["scenes"]
 
+        # Répertoire du fichier story principal — sert de base pour les goto inter-fichiers
+        self._story_dir = story_parent
+        self._loaded_file_keys = {str(Path(story_path).resolve())}
+        self._extra_files = []  # chemins relatifs pour la sauvegarde
+
         self.variables = {}
         self.save_manager = SaveManager()
         self.executor = ActionExecutor()
@@ -298,6 +303,56 @@ class VNApp:
     # ------------------------------------------------------------------
     # Chargement d'une scène
     # ------------------------------------------------------------------
+
+    def _parse_goto_destination(self, destination):
+        """Retourne (fichier_ou_None, scene_id_ou_None) depuis un goto."""
+        if isinstance(destination, dict):
+            return destination.get("file"), destination.get("scene")
+        if isinstance(destination, str) and "#" in destination:
+            file_part, scene_part = destination.split("#", 1)
+            return file_part.strip() or None, scene_part.strip() or None
+        if isinstance(destination, str) and destination.endswith((".yaml", ".yml")):
+            return destination, None
+        return None, destination
+
+    def _load_extra_story(self, file_ref):
+        """
+        Charge un fichier YAML supplémentaire et fusionne ses personnages
+        et scènes dans la partie en cours. Retourne l'id de la première scène
+        (utile quand aucune scène n'est précisée dans le goto).
+        """
+        path = Path(file_ref)
+        if not path.is_absolute():
+            path = (self._story_dir / file_ref).resolve()
+
+        key = str(path)
+        if key in self._loaded_file_keys:
+            # Déjà chargé : on retourne quand même la première scène du fichier
+            try:
+                story = load_story(path)
+                return next(iter(story["scenes"]), None)
+            except Exception:
+                return None
+
+        try:
+            story = load_story(path)
+        except Exception as err:
+            print(f"[VN] Impossible de charger '{file_ref}': {err}")
+            return None
+
+        for char_id, config in story["characters"].items():
+            self.chars.register(char_id, config, base_dir=self.base_dir)
+
+        for scene_id, scene in story["scenes"].items():
+            self.scenes[scene_id] = scene
+
+        self._loaded_file_keys.add(key)
+        rel = str(path.relative_to(self._story_dir.parent)
+                   if path.is_relative_to(self._story_dir.parent)
+                   else path)
+        self._extra_files.append(rel)
+
+        return next(iter(story["scenes"]), None)
 
     def _load_scene(self, scene_id):
         scene = self.scenes.get(scene_id)
@@ -714,16 +769,18 @@ class VNApp:
             self.executor.advance()
 
         elif "jump" in action or "goto" in action:
-            destination = (
-                action.get("jump")
-                or action.get("goto")
-            )
+            raw = action.get("jump") or action.get("goto")
+            file_ref, scene_id = self._parse_goto_destination(raw)
 
-            if destination in self.scenes:
-                self._load_scene(destination)
+            if file_ref:
+                first = self._load_extra_story(file_ref)
+                if scene_id is None:
+                    scene_id = first
 
+            if scene_id and scene_id in self.scenes:
+                self._load_scene(scene_id)
             else:
-                print(f"[VN] Unknown scene: {destination}")
+                print(f"[VN] Scène introuvable : {scene_id!r}")
                 self.executor.advance()
 
         elif "show" in action:
@@ -874,9 +931,14 @@ class VNApp:
             "current_speaker_name": self.current_speaker_name,
             "current_text": self.current_text,
             "choices": list(self.choices),
+            "extra_files": list(self._extra_files),
         }
 
     def _restore_from_save(self, data):
+        # Recharger les fichiers YAML supplémentaires avant la scène
+        for rel_path in (data.get("extra_files") or []):
+            self._load_extra_story(rel_path)
+
         scene_id = data.get("scene_id")
         if not scene_id or scene_id not in self.scenes:
             print(f"[VN] Sauvegarde invalide : scène inconnue {scene_id!r}")
