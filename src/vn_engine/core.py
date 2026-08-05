@@ -254,6 +254,7 @@ class VNApp:
         self._notification = ""
         self._notification_timer = 0
         self._transition = None
+        self._anim_barrier = None
 
         # ------------------------------------------------------------------
         # Arrière-plan
@@ -864,14 +865,14 @@ class VNApp:
                 self.executor.advance()
 
         elif "animate" in action:
-            spec     = action["animate"] or {}
-            char_id  = spec.get("character")
-            anim_type = spec.get("type", "shake")
-            duration = int(spec.get("duration", 500))
-            blocking = spec.get("wait", True)
-            kwargs   = {
+            spec      = action["animate"] or {}
+            char_id   = spec.get("id") or spec.get("character")
+            anim_type = spec.get("name") or spec.get("type", "shake")
+            duration  = int(spec.get("duration", 500))
+            blocking  = spec.get("blocking", spec.get("wait", True))
+            kwargs    = {
                 k: v for k, v in spec.items()
-                if k not in ("character", "type", "duration", "wait")
+                if k not in ("id", "character", "name", "type", "duration", "blocking", "wait")
             }
             anim = _create_animation(anim_type, duration, **kwargs)
             char = self.chars.get(char_id) if char_id else None

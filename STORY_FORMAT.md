@@ -592,18 +592,99 @@ Une transition bloque l'exécution jusqu'à sa fin, puis passe à l'action suiva
 |---|---|---|
 | `dissolve` | `block_size` (px, défaut 16) | Blocs aléatoires qui noircissent progressivement |
 
-### Ajouter une transition personnalisée
+### Créer une transition personnalisée
 
-Dans `src/vn_engine/transitions.py` :
+Toutes les transitions sont dans `src/vn_engine/transitions.py`.
+Le décorateur `@register("nom")` rend la transition disponible dans les YAML.
+
+#### API de `BaseTransition`
+
+| Attribut / méthode | Type | Description |
+|---|---|---|
+| `self.progress` | `float` 0→1 | Avancement de la transition |
+| `self.duration_ms` | `int` | Durée totale en millisecondes |
+| `self.done` | `bool` | `True` quand la transition est terminée |
+| `_alpha()` | → `int` 0-255 | Opacité de l'overlay (à implémenter) |
+| `_color()` | → `tuple` RGB | Couleur de l'overlay (à implémenter) |
+| `render(screen)` | — | Dessine l'overlay (surchargeable pour effets complexes) |
+
+#### Approche simple — overlay coloré
+
+Surcharger uniquement `_alpha()` et `_color()`. Le moteur dessine un rectangle
+de cette couleur avec cette opacité par-dessus toute la scène.
 
 ```python
 from vn_engine.transitions import BaseTransition, register
 
+# Fondu vers le rouge puis retour (flash)
 @register("flash_rouge")
 class FlashRouge(BaseTransition):
-    def _alpha(self): return int((1.0 - abs(self.progress * 2 - 1)) * 255)
-    def _color(self): return (255, 0, 0)
+    def _alpha(self):
+        # Cloche : 0 → max → 0
+        return int((1.0 - abs(self.progress * 2 - 1)) * 255)
+    def _color(self):
+        return (200, 0, 0)
+
+# Fondu vers du violet
+@register("fade_violet")
+class FadeViolet(BaseTransition):
+    def _alpha(self): return int(self.progress * 255)
+    def _color(self): return (80, 0, 120)
 ```
+
+#### Approche avancée — render() personnalisé
+
+Surcharger `render(screen)` pour dessiner n'importe quoi.
+`_alpha()` et `_color()` ne sont plus appelés.
+
+```python
+import pygame
+from vn_engine.transitions import BaseTransition, register
+
+# Balayage horizontal vers la droite
+@register("wipe_custom")
+class WipeCustom(BaseTransition):
+    def _alpha(self): return 255   # requis par l'interface, inutilisé
+    def _color(self): return (0, 0, 0)
+
+    def render(self, screen: pygame.Surface):
+        w, h = screen.get_size()
+        bar_w = int(w * self.progress)
+        if bar_w > 0:
+            pygame.draw.rect(screen, (0, 0, 0), (0, 0, bar_w, h))
+
+# Damier qui se remplit
+@register("damier")
+class Damier(BaseTransition):
+    TILE = 64
+
+    def _alpha(self): return 255
+    def _color(self): return (0, 0, 0)
+
+    def render(self, screen: pygame.Surface):
+        w, h = screen.get_size()
+        t = self.TILE
+        for row in range(0, h, t):
+            for col in range(0, w, t):
+                # Cases paires/impaires ont un décalage de phase
+                phase = ((col // t) + (row // t)) % 2 * 0.5
+                if self.progress >= phase:
+                    alpha = min(1.0, (self.progress - phase) * 2)
+                    s = pygame.Surface((t, t))
+                    s.fill((0, 0, 0))
+                    s.set_alpha(int(alpha * 255))
+                    screen.blit(s, (col, row))
+```
+
+#### Utilisation dans un YAML
+
+```yaml
+- transition: flash_rouge
+- transition: fade_violet
+- transition: damier
+```
+
+La durée par défaut est 500 ms. Pour la modifier, voir la section **Transitions** plus haut.
 
 ---
 
@@ -739,20 +820,124 @@ Applique un effet visuel à un personnage. Bloquant par défaut (`wait: true`).
     blocking: true
 ```
 
-### Ajouter une animation personnalisée
+### Créer une animation personnalisée
 
-Dans `src/vn_engine/animations.py` :
+Toutes les animations sont dans `src/vn_engine/animations.py`.
+Le décorateur `@register("nom")` rend l'animation disponible dans les YAML.
+
+#### API de `BaseAnimation`
+
+| Attribut / méthode | Type | Description |
+|---|---|---|
+| `self.progress` | `float` 0→1 | Avancement de l'animation |
+| `self.duration_ms` | `int` | Durée totale en millisecondes |
+| `self.done` | `bool` | `True` quand l'animation est terminée |
+| `get_transform(rect, surf)` | → `(Surface, Rect)` | À implémenter : retourne la surface et le rect modifiés |
+
+`get_transform` est appelé à chaque frame. Retourner `(surf, rect)` sans modification
+correspond à l'identité (aucun effet visible).
+
+#### Fonctions pygame utiles
+
+| Fonction | Effet |
+|---|---|
+| `pygame.transform.rotate(surf, angle)` | Rotation en degrés (sens trigonométrique) |
+| `pygame.transform.smoothscale(surf, (w, h))` | Redimensionnement lissé |
+| `pygame.transform.flip(surf, x, y)` | Miroir horizontal / vertical |
+| `rect.move(dx, dy)` | Déplace le rect sans modifier la surface |
+| `surf.copy()` + `surf.set_alpha(a)` | Copie avec transparence globale |
+| `surf.copy().fill((r,g,b,a), special_flags=pygame.BLEND_RGBA_MULT)` | Multiplie alpha par canal |
+
+#### Enveloppes courantes
 
 ```python
-from vn_engine.animations import BaseAnimation, register
-import pygame
+# Valeur qui monte de 0 à 1
+t = self.progress
 
-@register("rotation")
-class Rotation(BaseAnimation):
+# Atténuation exponentielle (fort au début, s'estompe)
+fade_out = 1.0 - t
+
+# Cloche parabolique : 0 → max → 0
+pulse = 4 * t * (1.0 - t)
+
+# Smooth-step (accélération douce entrée/sortie)
+ease = t * t * (3.0 - 2.0 * t)
+
+# Oscillation sinusoïdale (N cycles)
+import math
+osc = math.sin(t * math.pi * 2 * N)
+```
+
+#### Exemples
+
+```python
+import math
+import pygame
+from vn_engine.animations import BaseAnimation, register
+
+# Rotation progressive jusqu'à 360°
+@register("spin")
+class Spin(BaseAnimation):
     def get_transform(self, rect, surf):
-        angle = self.progress * 15   # 15° max
+        angle = self.progress * 360
         rotated = pygame.transform.rotate(surf, angle)
         return rotated, rotated.get_rect(center=rect.center)
+
+
+# Miroir horizontal pulsé
+@register("mirror_pulse")
+class MirrorPulse(BaseAnimation):
+    def get_transform(self, rect, surf):
+        # Bascule toutes les demi-secondes selon le nombre de frames écoulées
+        flip = int(self.progress * 6) % 2 == 1
+        return pygame.transform.flip(surf, flip, False), rect
+
+
+# Tremblement vertical (tête qui dit non)
+@register("headshake")
+class Headshake(BaseAnimation):
+    def __init__(self, duration_ms=600, amplitude=20, cycles=3):
+        super().__init__(duration_ms)
+        self.amplitude = int(amplitude)
+        self.cycles = float(cycles)
+
+    def get_transform(self, rect, surf):
+        fade = 1.0 - self.progress
+        dx = int(math.sin(self.progress * math.pi * 2 * self.cycles)
+                 * self.amplitude * fade)
+        return surf, rect.move(dx, 0)
+
+
+# Fondu de couleur : teinte la surface progressivement
+@register("tint_red")
+class TintRed(BaseAnimation):
+    def get_transform(self, rect, surf):
+        alpha = int(180 * 4 * self.progress * (1.0 - self.progress))
+        copy = surf.copy()
+        copy.fill((alpha, 0, 0, 0), special_flags=pygame.BLEND_RGB_ADD)
+        return copy, rect
+```
+
+#### Paramètres personnalisés depuis le YAML
+
+Définis dans `__init__` avec des valeurs par défaut :
+
+```python
+@register("headshake")
+class Headshake(BaseAnimation):
+    def __init__(self, duration_ms=600, amplitude=20, cycles=3):
+        super().__init__(duration_ms)
+        self.amplitude = int(amplitude)
+        self.cycles    = float(cycles)
+```
+
+```yaml
+- animate:
+    id: captain
+    name: headshake
+    duration: 800
+    amplitude: 30     # transmis à __init__
+    cycles: 4
 ```
 
 
