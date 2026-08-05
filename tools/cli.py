@@ -38,7 +38,7 @@ def main():
 
     args = parser.parse_args()
     if args.command == 'run':
-        app = VNApp(args.story)
+        app = VNApp(args.story, base_dir=ROOT)
         app.run()
     else:
         parser.print_help()

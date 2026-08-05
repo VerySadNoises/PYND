@@ -201,7 +201,126 @@ actions:
         goto: next_scene
 ```
 
-> Les variables sont actuellement stockées en mémoire (non sauvegardées entre sessions). La sauvegarde sera ajoutée prochainement.
+> Les variables sont sauvegardées automatiquement lors d'une sauvegarde rapide (**F5**) et restaurées au chargement (**F9**).
+
+---
+
+## Dialogues et actions conditionnels (`if`)
+
+Exécute une branche `then` ou `else` selon la valeur d'une variable.
+
+### Dialogue conditionnel simple
+
+```yaml
+actions:
+  - if:
+      condition: "explored"
+      then:
+        - settler: "Vous connaissez déjà cette route."
+      else:
+        - settler: "C'est votre premier voyage ici."
+```
+
+### Basé sur une valeur de variable
+
+```yaml
+actions:
+  - if:
+      condition: "mood == confident"
+      then:
+        - captain: "Avec cette attitude, rien ne peut nous arrêter !"
+      else:
+        - captain: "Ensemble, nous affronterons tout."
+```
+
+### Combiné avec `set` pour mémoriser un choix
+
+```yaml
+actions:
+  - choice:
+      - text: "Prendre le risque"
+        set:
+          mood: brave
+        actions:
+          - settler: "Je savais que vous seriez courageux."
+      - text: "Rester prudent"
+        set:
+          mood: cautious
+        actions:
+          - settler: "La prudence est une vertu."
+
+  - if:
+      condition: "mood == brave"
+      then:
+        - captain: "Plein gaz !"
+      else:
+        - captain: "Nous avançons lentement."
+```
+
+> La branche `else` est optionnelle.
+
+---
+
+## Choix conditionnels
+
+Ajoutez `condition` sur une option pour la masquer si la condition est fausse.
+
+### Option débloquée par une variable
+
+```yaml
+  - choice:
+      - text: "Utiliser la clé secrète"
+        condition: "has_key"          # masquée si has_key est false / non définie
+        actions:
+          - settler: "La porte s'ouvre !"
+        goto: secret_room
+      - text: "Continuer sans la clé"
+        goto: next_scene
+```
+
+### Option bloquée par une valeur
+
+```yaml
+  - choice:
+      - text: "Demander pardon"
+        condition: "reputation < 5"   # visible seulement si réputation faible
+        actions:
+          - captain: "Il était temps."
+      - text: "Féliciter l'équipage"
+        condition: "reputation >= 5"
+        actions:
+          - captain: "Merci, commandant."
+```
+
+---
+
+## Syntaxe des conditions
+
+Les conditions s'écrivent comme des expressions Python simplifiées.
+
+| Type | Exemple | Description |
+|---|---|---|
+| Variable booléenne | `explored` | Vrai si la variable est définie et non nulle |
+| Négation | `not explored` | Vrai si la variable est fausse / non définie |
+| Égalité (chaîne) | `mood == confident` | Compare la valeur de `mood` au mot `confident` |
+| Inégalité | `mood != angry` | |
+| Numérique | `score >= 10` | Supporte `<` `<=` `>` `>=` |
+| Logique | `has_key and level >= 2` | Supporte `and` / `or` |
+| Avec guillemets | `mood == "confident"` | Les guillemets sont optionnels pour les chaînes |
+
+> Les valeurs booléennes s'écrivent `true` et `false` (minuscules).
+
+---
+
+## Sauvegarde rapide
+
+| Touche | Effet |
+|---|---|
+| **F5** | Sauvegarde la progression (scène, position, variables) dans le slot 1 |
+| **F9** | Charge la dernière sauvegarde du slot 1 |
+
+Une notification verte s'affiche brièvement en haut à droite pour confirmer l'action.
+Les fichiers de sauvegarde sont au format JSON dans le dossier `saves/`.
 
 ---
 
@@ -317,6 +436,8 @@ scenes:
 | `Espace` ou clic gauche | Avancer le dialogue |
 | `1` … `9` | Sélectionner un choix |
 | Survol souris | Surbrillance sur les choix |
+| `F5` | Sauvegarde rapide (slot 1) |
+| `F9` | Chargement rapide (slot 1) |
 | `Echap` | Quitter |
 
 ---

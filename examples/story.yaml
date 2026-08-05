@@ -51,8 +51,34 @@ scenes:
       - captain
 
     actions:
+      # Marque la progression du joueur dans les variables
+      - set:
+          explored: true
+
       - captain: "Engines are online. We're heading out!"
       - settler: "I'll chart the stars."
+
+      # Le joueur choisit son état d'esprit — la variable mood est stockée
+      - choice:
+          - text: "Ready for anything!"
+            set:
+              mood: confident
+            actions:
+              - settler: "That's the spirit!"
+          - text: "I'm not sure about this..."
+            set:
+              mood: uncertain
+            actions:
+              - settler: "Don't worry — I'll guide you."
+
+      # Dialogue conditionnel basé sur le choix précédent (action 'if')
+      - if:
+          condition: "mood == confident"
+          then:
+            - captain: "With that attitude, nothing can stop us!"
+          else:
+            - captain: "Together we'll face whatever lies ahead."
+
       - captain: "Then let us begin."
 
   - id: stay_scene
@@ -64,3 +90,14 @@ scenes:
 
     actions:
       - captain: "You chose to stay. The ship departs without you."
+
+      # L'option "Changer d'avis" est masquée car stayed == true ici ;
+      # c'est un exemple de choix conditionnel verrouillé par variable.
+      - choice:
+          - text: "Wait, I changed my mind!"
+            condition: "stayed != true"
+            actions:
+              - captain: "The ship has already left. It's too late."
+          - text: "So be it. Farewell."
+            actions:
+              - captain: "Farewell, traveler. Perhaps our paths will cross again."

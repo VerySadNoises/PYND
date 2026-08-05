@@ -1,3 +1,4 @@
+import ast
 import json
 from pathlib import Path
 
@@ -44,6 +45,86 @@ class SaveManager:
         )
 
 
+# ---------------------------------------------------------------------------
+# Évaluation sécurisée des conditions (sans eval)
+# ---------------------------------------------------------------------------
+
+def _eval_ast_node(node, variables, _rhs=False):
+    """Évalue récursivement un nœud AST Python contre un dict de variables."""
+    if isinstance(node, ast.BoolOp):
+        values = [_eval_ast_node(v, variables) for v in node.values]
+        if isinstance(node.op, ast.And):
+            return all(values)
+        return any(values)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return not _eval_ast_node(node.operand, variables)
+    if isinstance(node, ast.Compare):
+        left = _eval_ast_node(node.left, variables, _rhs=False)
+        for op, comparator in zip(node.ops, node.comparators):
+            right = _eval_ast_node(comparator, variables, _rhs=True)
+            op_type = type(op)
+            try:
+                if op_type is ast.Eq:
+                    passed = left == right
+                elif op_type is ast.NotEq:
+                    passed = left != right
+                elif op_type is ast.Lt:
+                    passed = left < right
+                elif op_type is ast.LtE:
+                    passed = left <= right
+                elif op_type is ast.Gt:
+                    passed = left > right
+                elif op_type is ast.GtE:
+                    passed = left >= right
+                else:
+                    passed = False
+            except TypeError:
+                passed = False
+            if not passed:
+                return False
+            left = right
+        return True
+    if isinstance(node, ast.Name):
+        name = node.id
+        if name == "true":
+            return True
+        if name == "false":
+            return False
+        if name in ("null", "none"):
+            return None
+        # Côté droit d'une comparaison : si la variable n'est pas définie,
+        # traiter le nom comme un littéral chaîne (ex: mood == confident).
+        if _rhs and name not in variables:
+            return name
+        return variables.get(name, None)
+    if isinstance(node, ast.Constant):
+        return node.value
+    # Compatibilité Python < 3.8
+    if isinstance(node, ast.NameConstant):
+        return node.value
+    if isinstance(node, ast.Num):
+        return node.n
+    if isinstance(node, ast.Str):
+        return node.s
+    raise ValueError(f"Nœud AST non supporté : {type(node).__name__}")
+
+
+def _evaluate_condition(expr, variables):
+    """Retourne True si la condition str est vérifiée, False sinon."""
+    if not expr:
+        return True
+    text = str(expr).strip().lower()
+    if text in ("true", "1", "yes"):
+        return True
+    if text in ("false", "0", "no"):
+        return False
+    try:
+        tree = ast.parse(str(expr), mode="eval")
+        return bool(_eval_ast_node(tree.body, variables))
+    except Exception:
+        return True
+
+
 class VNApp:
     _DLGBOX_H = 200
     _DLGBOX_COLOR = (10, 10, 20, 210)
@@ -57,6 +138,7 @@ class VNApp:
         story_path,
         width=1280,
         height=720,
+        base_dir=None,
     ):
         pygame.init()
 
@@ -87,7 +169,16 @@ class VNApp:
 
         story = load_story(story_path)
 
-        self.base_dir = Path(story_path).resolve().parent
+        # base_dir est la racine depuis laquelle les chemins d'assets sont résolus.
+        # Si non fourni, on remonte d'un niveau par rapport au story.yaml
+        # pour retomber sur la racine du projet (cas typique : examples/story.yaml).
+        story_parent = Path(story_path).resolve().parent
+        if base_dir is not None:
+            self.base_dir = Path(base_dir).resolve()
+        elif (story_parent.parent / "assets").exists():
+            self.base_dir = story_parent.parent
+        else:
+            self.base_dir = story_parent
 
         self.chars = CharacterRegistry(
             story["characters"],
@@ -99,6 +190,10 @@ class VNApp:
         self.variables = {}
         self.save_manager = SaveManager()
         self.executor = ActionExecutor()
+
+        self.current_scene_id = None
+        self._notification = ""
+        self._notification_timer = 0
 
         # ------------------------------------------------------------------
         # Arrière-plan
@@ -160,6 +255,7 @@ class VNApp:
             self.running = False
             return
 
+        self.current_scene_id = scene_id
         self._load_background(scene.get("background"))
         self._play_music(scene.get("music"))
 
@@ -469,6 +565,12 @@ class VNApp:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
 
+                elif event.key == pygame.K_F5:
+                    self._quick_save()
+
+                elif event.key == pygame.K_F9:
+                    self._quick_load()
+
                 elif (
                     event.key == pygame.K_SPACE
                     and self.mode == "waiting"
@@ -495,6 +597,11 @@ class VNApp:
                             break
 
     def _update(self):
+        if self._notification_timer > 0:
+            self._notification_timer -= self.clock.get_time()
+            if self._notification_timer <= 0:
+                self._notification = ""
+                self._notification_timer = 0
         if self.mode == "running":
             self._execute_next()
 
@@ -541,7 +648,11 @@ class VNApp:
             self.mode = "waiting"
 
         elif "choice" in action:
-            self.choices = action["choice"] or []
+            all_choices = action["choice"] or []
+            self.choices = [
+                c for c in all_choices
+                if _evaluate_condition(c.get("condition", "true"), self.variables)
+            ]
             self.mode = "choice"
 
         elif "set" in action:
@@ -598,6 +709,17 @@ class VNApp:
         elif "music" in action:
             self._play_music(action["music"])
             self.executor.advance()
+
+        elif "if" in action:
+            if_data = action["if"] or {}
+            condition = if_data.get("condition", "true")
+            if _evaluate_condition(condition, self.variables):
+                sub_actions = list(if_data.get("then") or [])
+            else:
+                sub_actions = list(if_data.get("else") or [])
+            self.executor.advance()
+            if sub_actions:
+                self.executor.push(sub_actions)
 
         else:
             self.executor.advance()
@@ -685,6 +807,60 @@ class VNApp:
         self.mode = "running"
 
     # ------------------------------------------------------------------
+    # Sauvegarde / chargement
+    # ------------------------------------------------------------------
+
+    def _build_save_data(self):
+        return {
+            "scene_id": self.current_scene_id,
+            "variables": dict(self.variables),
+            "stack": [
+                [list(actions), idx]
+                for actions, idx in self.executor._stack
+            ],
+            "mode": self.mode,
+            "current_speaker_name": self.current_speaker_name,
+            "current_text": self.current_text,
+            "choices": list(self.choices),
+        }
+
+    def _restore_from_save(self, data):
+        scene_id = data.get("scene_id")
+        if not scene_id or scene_id not in self.scenes:
+            print(f"[VN] Sauvegarde invalide : scène inconnue {scene_id!r}")
+            return
+        self._load_scene(scene_id)
+        self.executor._stack = [
+            [list(actions), idx]
+            for actions, idx in (data.get("stack") or [])
+        ]
+        self.variables = dict(data.get("variables") or {})
+        self.current_speaker_name = data.get("current_speaker_name", "")
+        self.current_speaker_id = self.chars.resolve_speaker(
+            self.current_speaker_name
+        )
+        self.current_text = data.get("current_text", "")
+        self.mode = data.get("mode", "running")
+        self.choices = list(data.get("choices") or [])
+        self._choice_rects = []
+
+    def _quick_save(self):
+        self.save_manager.save(1, self._build_save_data())
+        self._notify("Partie sauvegardée  [F5]")
+
+    def _quick_load(self):
+        data = self.save_manager.load(1)
+        if data is None:
+            self._notify("Aucune sauvegarde trouvée")
+            return
+        self._restore_from_save(data)
+        self._notify("Partie chargée  [F9]")
+
+    def _notify(self, message, duration_ms=2000):
+        self._notification = message
+        self._notification_timer = duration_ms
+
+    # ------------------------------------------------------------------
     # Affichage
     # ------------------------------------------------------------------
 
@@ -719,6 +895,8 @@ class VNApp:
 
         if self.mode == "choice":
             self._render_choices()
+
+        self._render_notification()
 
         pygame.display.flip()
 
@@ -848,6 +1026,24 @@ class VNApp:
             )
 
             current_y += line_height + 14
+
+    def _render_notification(self):
+        if not self._notification:
+            return
+        surface = self.font_choice.render(
+            self._notification,
+            True,
+            (100, 255, 100),
+        )
+        x = self.W - surface.get_width() - 20
+        y = 20
+        bg = pygame.Surface(
+            (surface.get_width() + 16, surface.get_height() + 10),
+            pygame.SRCALPHA,
+        )
+        bg.fill((0, 0, 0, 160))
+        self.screen.blit(bg, (x - 8, y - 5))
+        self.screen.blit(surface, (x, y))
 
     def _draw_text_wrapped(
         self,

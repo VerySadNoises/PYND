@@ -1,7 +1,7 @@
 import yaml
 from pathlib import Path
 
-_RESERVED = {"say", "choice", "set", "jump", "goto", "show", "hide", "background", "wait"}
+_RESERVED = {"say", "choice", "set", "jump", "goto", "show", "hide", "background", "wait", "if", "music"}
 
 
 def _normalize_actions(actions, char_ids):
@@ -28,6 +28,15 @@ def _normalize_actions(actions, char_ids):
                     choice["actions"] = _normalize_actions(choice["actions"], char_ids)
                 normalized_choices.append(choice)
             result.append({"choice": normalized_choices})
+            continue
+        # recurse into if then/else branches
+        if "if" in action:
+            if_data = dict(action["if"] or {})
+            if "then" in if_data:
+                if_data["then"] = _normalize_actions(if_data["then"], char_ids)
+            if "else" in if_data:
+                if_data["else"] = _normalize_actions(if_data["else"], char_ids)
+            result.append({"if": if_data})
             continue
         result.append(action)
     return result
