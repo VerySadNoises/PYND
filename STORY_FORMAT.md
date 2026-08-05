@@ -370,11 +370,66 @@ Les fichiers de sauvegarde sont au format JSON dans le dossier `saves/`.
       audio: true
 ```
 
+
+```yaml
+# Opération pour une variable
+# Initialiser
+- set:
+    money: 150
+    reputation: 0
+
+# Ajouter / soustraire
+- set:
+    money: "money + 50"
+    reputation: "reputation + 1"
+
+# Multiplier, diviser
+- set:
+    money: "money * 2"
+    money: "money // 3"   # division entière
+
+# Dans un choix
+- choice:
+    - text: "Soudoyer le garde (50 crédits)"
+      condition: "money >= 50"
+      set:
+        money: "money - 50"
+      actions:
+        - garde: "Passez."
+
+    - text: "Travailler pour gagner de l'argent"
+      set:
+        money: "money + 20"
+        reputation: "reputation + 1"
+      actions:
+        - patron: "Bien joué, voici votre salaire."
+
+```
+```yaml
+# Variable dans une ligne de dialogue
+- set:
+    player_name: "Zara"
+    money: 150
+    reputation: 7
+
+- merchant: "Bonjour {player_name}, vous avez {money} crédits."
+- captain: "Votre réputation est de {reputation}/10."
+
+# Fonctionne aussi dans les if et partout où il y a du texte
+- if:
+    condition: "money >= 100"
+    then:
+      - merchant: "Avec {money} crédits, vous pouvez vous offrir ce vaisseau."
+    else:
+      - merchant: "Il vous manque {money} crédits pour l'acheter."
+```
+
 ---
 
 ## Exemple complet
 
 ```yaml
+# Opération
 characters:
   alex:
     name: Alex
@@ -426,6 +481,9 @@ scenes:
       - commander: "L'équipe est en route."
       - alex: "Merci, Commandant."
 ```
+
+
+
 
 ---
 

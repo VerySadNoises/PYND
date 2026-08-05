@@ -58,6 +58,30 @@ def _eval_ast_node(node, variables, _rhs=False):
         return any(values)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
         return not _eval_ast_node(node.operand, variables)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        val = _eval_ast_node(node.operand, variables)
+        return -(val if val is not None else 0)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.UAdd):
+        val = _eval_ast_node(node.operand, variables)
+        return +(val if val is not None else 0)
+    if isinstance(node, ast.BinOp):
+        left  = _eval_ast_node(node.left,  variables)
+        right = _eval_ast_node(node.right, variables)
+        # Les variables non définies (None) valent 0 dans les calculs numériques
+        if left  is None: left  = 0
+        if right is None: right = 0
+        op_type = type(node.op)
+        try:
+            if op_type is ast.Add:       return left + right
+            if op_type is ast.Sub:       return left - right
+            if op_type is ast.Mult:      return left * right
+            if op_type is ast.Div:       return left / right
+            if op_type is ast.FloorDiv:  return left // right
+            if op_type is ast.Mod:       return left % right
+            if op_type is ast.Pow:       return left ** right
+        except (TypeError, ZeroDivisionError):
+            return None
+        return None
     if isinstance(node, ast.Compare):
         left = _eval_ast_node(node.left, variables, _rhs=False)
         for op, comparator in zip(node.ops, node.comparators):
@@ -123,6 +147,34 @@ def _evaluate_condition(expr, variables):
         return bool(_eval_ast_node(tree.body, variables))
     except Exception:
         return True
+
+
+def _evaluate_expression(expr, variables):
+    """Évalue une expression pour l'action set (arithmétique, variable, littéral)."""
+    if not isinstance(expr, str):
+        return expr
+    try:
+        tree = ast.parse(str(expr), mode="eval")
+        # _rhs=True : un nom inconnu est traité comme un littéral chaîne
+        result = _eval_ast_node(tree.body, variables, _rhs=True)
+        return result
+    except Exception:
+        return expr
+
+
+def _interpolate(text, variables):
+    """Remplace {variable} dans le texte par la valeur de la variable."""
+    if not isinstance(text, str) or "{" not in text:
+        return text
+
+    class _SafeDict(dict):
+        def __missing__(self, key):  # laisse {key} intact si la variable n'existe pas
+            return f"{{{key}}}"
+
+    try:
+        return str(text).format_map(_SafeDict(variables))
+    except Exception:
+        return text
 
 
 class VNApp:
@@ -639,9 +691,9 @@ class VNApp:
                 self.current_speaker_name
             )
 
-            self.current_text = dialogue.get(
-                "text",
-                "",
+            self.current_text = _interpolate(
+                dialogue.get("text", ""),
+                self.variables,
             )
 
             self.executor.advance()
@@ -657,7 +709,7 @@ class VNApp:
 
         elif "set" in action:
             for key, value in (action["set"] or {}).items():
-                self.variables[key] = value
+                self.variables[key] = _evaluate_expression(value, self.variables)
 
             self.executor.advance()
 
