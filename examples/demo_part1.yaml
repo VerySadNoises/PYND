@@ -10,6 +10,8 @@
 #    - if / else imbriqués + condition sur variable
 #    - choix conditionnels (condition:)
 #    - show / hide en cours de scène
+#    - overlays : PNG statique + GIF avec scale / translate (images disponibles)
+#    - sfx audio par-dessus la musique
 #    - goto inter-fichiers vers demo_part2.yaml
 #    - sauvegarde / chargement : F5 / F9
 # ============================================================
@@ -54,6 +56,26 @@ scenes:
 
       # ----- Ouverture -----
       - transition: fade_in
+
+      # Overlay : silhouette du Pilote en transparence — flotte et pulse en arrière-plan
+      - overlay:
+          file: assets/characters/Pilot2.png
+          x: 950
+          y: 60
+          width: 180
+          height: 260
+          opacity: 55
+          loop: true
+          scale:
+            start: 0.92
+            end: 1.05
+            duration: 2400
+            loop: true
+          translate:
+            dx: 0
+            dy: -18
+            duration: 3000
+            loop: true
 
       # Entrées animées des personnages (slide_in en parallèle)
       - animate:
@@ -116,6 +138,17 @@ scenes:
 
       - transition: fade_black
 
+      # Overlay d'ambiance : image du vaisseau légèrement zoomed + glissante (effet claustrophobie)
+      - overlay:
+          file: assets/bg/bg_spaceship.jpg
+          opacity: 45
+          loop: true
+          scale:
+            start: 1.0
+            end: 1.06
+            duration: 4000
+            loop: true
+
       - settler: "Oxygène restant : {oxygene} %. Dépêchons-nous, {nom_joueur}."
 
       # Dialogue conditionnel selon l'approche choisie en scène 1
@@ -142,6 +175,8 @@ scenes:
           then:
             - set:
                 a_vu_alerte: true
+            - sfx:
+                file: assets/audio/explosion.ogg   # à remplacer par ton fichier
             - animate:
                 id: pilot
                 name: shake
@@ -181,6 +216,9 @@ scenes:
       # hide : on cache Alma pour la transition vers la partie 2
       - hide:
           id: settler
+
+      # Stoppe tous les overlays avant le passage à la partie 2
+      - stop_overlay:
 
       - pilot: "La salle des machines est au bout du couloir. Allons-y."
 

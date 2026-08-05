@@ -115,6 +115,163 @@ actions:
 
 ---
 
+## Effets sonores (SFX)
+
+Les SFX se jouent sur un canal séparé, par-dessus la musique de fond.
+Formats supportés : OGG, WAV, MP3.
+
+### Forme courte
+
+```yaml
+- sfx: assets/audio/sfx/explosion.ogg
+```
+
+### Avec options
+
+```yaml
+- sfx:
+    file: assets/audio/sfx/alarm.ogg
+    volume: 0.8       # 0.0 (silence) → 1.0 (plein volume), défaut : 1.0
+    loop: true        # joue en boucle (défaut : false)
+```
+
+### Arrêter tous les SFX en cours
+
+```yaml
+- stop_sfx:
+```
+
+> **Note :** `stop_sfx` n'arrête pas la musique de fond — uniquement les SFX.
+> Pour arrêter la musique, utiliser `- music: stop`.
+
+---
+
+## Overlays visuels (GIF / MP4 / PNG)
+
+Un overlay est un élément visuel superposé **par-dessus les personnages** mais
+**sous la boîte de dialogue**. Supporte GIF animés, vidéos MP4 et images PNG/JPG.
+
+### Forme courte (plein écran, en boucle)
+
+```yaml
+- overlay: assets/effects/rain.gif
+```
+
+### Options complètes
+
+```yaml
+- overlay:
+    file: assets/effects/fire.gif
+    loop: true           # boucle (défaut : true)
+    opacity: 180         # 0 = transparent, 255 = opaque (défaut : 255)
+    x: 0                 # position du coin supérieur gauche en pixels
+    y: 0
+    width: 640           # taille (omis = plein écran)
+    height: 360
+```
+
+### Transform : translation
+
+Glisse l’overlay depuis sa position initiale vers `(x+dx, y+dy)` en ping-pong.
+
+```yaml
+- overlay:
+    file: assets/effects/sparkle.png
+    x: 300
+    y: 100
+    translate:
+      dx: 200            # déplacement horizontal en pixels
+      dy: -80            # déplacement vertical en pixels
+      duration: 1500     # durée d’un aller en ms
+      loop: true         # ping-pong (true) ou arrêt à la fin (false)
+```
+
+### Transform : scale (zoom animé)
+
+```yaml
+- overlay:
+    file: assets/effects/glow.png
+    x: 500
+    y: 200
+    width: 200
+    height: 200
+    scale:
+      start: 0.8         # échelle de départ
+      end: 1.3           # échelle d’arrivée
+      duration: 800
+      loop: true         # ping-pong
+```
+
+Valeur statique (taille fixe sans animation) :
+
+```yaml
+    scale: 0.5           # réduit l’overlay à 50 % de width/height
+```
+
+### Transform : rotation continue
+
+```yaml
+- overlay:
+    file: assets/effects/vortex.gif
+    rotate:
+      speed: 45          # degrés par seconde (positif = sens anti-horaire)
+```
+
+Forme courte (juste une vitesse) :
+
+```yaml
+    rotate: 90           # 90 °/s
+```
+
+### Combiner plusieurs transforms
+
+```yaml
+- overlay:
+    file: assets/effects/energy.gif
+    x: 400
+    y: 150
+    width: 300
+    height: 300
+    opacity: 200
+    loop: true
+    scale:
+      start: 0.9
+      end: 1.1
+      duration: 600
+      loop: true
+    rotate: 30
+    translate:
+      dx: 0
+      dy: -20
+      duration: 1200
+      loop: true
+```
+
+### Plusieurs overlays simultanés
+
+```yaml
+- overlay: assets/effects/rain.gif
+- overlay:
+    file: assets/effects/lightning.mp4
+    loop: false
+    opacity: 220
+```
+
+### Stopper un overlay
+
+```yaml
+# Un overlay précis
+- stop_overlay: assets/effects/rain.gif
+
+# Tous les overlays
+- stop_overlay:
+```
+
+> Les overlays sont effacés automatiquement au changement de scène.
+> Pour un overlay persistant, relàncez-le au début de chaque scène.
+
+---
+
 ## Dialogues
 
 ### Syntaxe courte (recommandée)
@@ -386,15 +543,25 @@ characters:
 ### Changer la position en cours de scène (`show`)
 
 ```yaml
+# Snap instantané (défaut)
 - show:
     id: alice
-    position: center          # nomé
+    position: center
 
+# Glissement fluide vers la nouvelle position
+- show:
+    id: alice
+    position: right
+    duration: 400        # ms — déclenche une animation _move_to
+
+# Glissement bloquant (le jeu attend la fin)
 - show:
     id: alice
     position:
-      x: 0.35                 # numérique
+      x: 0.35
       y: 0.85
+    duration: 500
+    blocking: true
 ```
 
 ---

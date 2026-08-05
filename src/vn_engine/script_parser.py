@@ -1,7 +1,7 @@
 import yaml
 from pathlib import Path
 
-_RESERVED = {"say", "choice", "set", "jump", "goto", "show", "hide", "background", "wait", "if", "music", "transition", "animate"}
+_RESERVED = {"say", "choice", "set", "jump", "goto", "show", "hide", "background", "wait", "if", "music", "transition", "animate", "sfx", "stop_sfx", "overlay", "stop_overlay"}
 
 
 def _normalize_actions(actions, char_ids):

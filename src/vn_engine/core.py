@@ -206,6 +206,9 @@ class VNApp:
         except pygame.error as error:
             print(f"[Audio] Initialisation impossible: {error}")
 
+        # Réserve 16 canaux : canal 0 = réservé musique, 1-15 = effets sonores
+        pygame.mixer.set_num_channels(16)
+
         self.W = width
         self.H = height
 
@@ -255,6 +258,7 @@ class VNApp:
         self._notification_timer = 0
         self._transition = None
         self._anim_barrier = None
+        self._overlays: list = []  # effets visuels superposés (GIF / MP4 / image)
 
         # ------------------------------------------------------------------
         # Arrière-plan
@@ -419,6 +423,7 @@ class VNApp:
         self.current_text = ""
         self.choices = []
         self._choice_rects = []
+        self._overlays.clear()
 
         self.executor.load(
             scene.get("actions", [])
@@ -719,6 +724,8 @@ class VNApp:
                 self._notification = ""
                 self._notification_timer = 0
 
+        self._tick_overlays(delta)
+
         if self._transition is not None:
             self._transition.tick(delta)
             if self._transition.done:
@@ -868,6 +875,26 @@ class VNApp:
             self._play_music(action["music"])
             self.executor.advance()
 
+        elif "sfx" in action:
+            self._play_sfx(action["sfx"])
+            self.executor.advance()
+
+        elif "stop_sfx" in action:
+            pygame.mixer.stop()
+            self.executor.advance()
+
+        elif "overlay" in action:
+            self._load_overlay(action["overlay"])
+            self.executor.advance()
+
+        elif "stop_overlay" in action:
+            key = action["stop_overlay"]
+            if key:
+                self._overlays = [o for o in self._overlays if o["key"] != str(key)]
+            else:
+                self._overlays.clear()
+            self.executor.advance()
+
         elif "transition" in action:
             spec = action["transition"]
             if isinstance(spec, str):
@@ -959,6 +986,287 @@ class VNApp:
 
         except Exception as error:
             print(f"[Music] {error}")
+
+    # ------------------------------------------------------------------
+    # Effets sonores (SFX)
+    # ------------------------------------------------------------------
+
+    def _play_sfx(self, spec):
+        if not pygame.mixer.get_init():
+            return
+        if not spec or spec in ("stop", "none", False):
+            pygame.mixer.stop()
+            return
+        if isinstance(spec, dict):
+            path_val = spec.get("file") or spec.get("path", "")
+            volume   = float(spec.get("volume", 1.0))
+            loops    = -1 if spec.get("loop", False) else 0
+        else:
+            path_val = str(spec)
+            volume   = 1.0
+            loops    = 0
+        try:
+            path = Path(path_val)
+            if not path.is_absolute():
+                path = (self.base_dir / path).resolve()
+            sound = pygame.mixer.Sound(str(path))
+            sound.set_volume(max(0.0, min(1.0, volume)))
+            channel = pygame.mixer.find_channel(True)
+            if channel:
+                channel.play(sound, loops=loops)
+        except Exception as error:
+            print(f"[SFX] {error}")
+
+    # ------------------------------------------------------------------
+    # Overlays visuels (GIF / MP4 / image statique)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_overlay_transforms(spec):
+        t_translate = None
+        if "translate" in spec:
+            t = spec["translate"]
+            if isinstance(t, dict):
+                t_translate = {
+                    "dx":       int(t.get("dx", 0)),
+                    "dy":       int(t.get("dy", 0)),
+                    "duration": max(1, int(t.get("duration", 1000))),
+                    "loop":     bool(t.get("loop", True)),
+                }
+        t_scale = None
+        if "scale" in spec:
+            s = spec["scale"]
+            if isinstance(s, dict):
+                t_scale = {
+                    "start":    float(s.get("start", 1.0)),
+                    "end":      float(s.get("end", 1.0)),
+                    "duration": max(1, int(s.get("duration", 1000))),
+                    "loop":     bool(s.get("loop", False)),
+                }
+            elif isinstance(s, (int, float)):
+                # Valeur statique : taille fixe sans animation
+                t_scale = {"start": float(s), "end": float(s), "duration": 1, "loop": False}
+        t_rotate = None
+        if "rotate" in spec:
+            r = spec["rotate"]
+            if isinstance(r, dict):
+                t_rotate = {"speed": float(r.get("speed", 90))}
+            elif isinstance(r, (int, float)):
+                t_rotate = {"speed": float(r)}
+        return t_translate, t_scale, t_rotate
+
+    @staticmethod
+    def _overlay_transform_progress(params, elapsed_ms):
+        duration = params["duration"]
+        if params.get("loop"):
+            # Ping-pong : 0→1→0→1…
+            cycle = (elapsed_ms / duration) % 2.0
+            return cycle if cycle <= 1.0 else 2.0 - cycle
+        return min(1.0, elapsed_ms / duration)
+
+    def _load_overlay(self, spec):
+        if not spec:
+            return
+        if isinstance(spec, str):
+            spec = {"file": spec}
+        path_val = spec.get("file") or spec.get("path", "")
+        loop    = bool(spec.get("loop", True))
+        opacity = max(0, min(255, int(spec.get("opacity", 255))))
+        ox      = int(spec.get("x", 0))
+        oy      = int(spec.get("y", 0))
+        ow      = int(spec.get("width",  spec.get("w", 0))) or self.W
+        oh      = int(spec.get("height", spec.get("h", 0))) or self.H
+        t_translate, t_scale, t_rotate = self._parse_overlay_transforms(spec)
+
+        path = Path(path_val)
+        if not path.is_absolute():
+            path = (self.base_dir / path).resolve()
+        key = path_val
+
+        self._overlays = [o for o in self._overlays if o["key"] != key]
+
+        def _base(extra):
+            return {
+                "key": key, "loop": loop, "done": False,
+                "opacity": opacity, "x": ox, "y": oy,
+                "orig_w": ow, "orig_h": oh,
+                "transform_elapsed": 0.0,
+                "t_translate": t_translate,
+                "t_scale": t_scale,
+                "t_rotate": t_rotate,
+                **extra,
+            }
+
+        ext = path.suffix.lower()
+        if ext == ".gif":
+            frames = self._load_overlay_gif(path, ow, oh)
+            if frames:
+                self._overlays.append(_base({
+                    "type": "gif", "frames": frames, "frame_idx": 0, "elapsed": 0.0,
+                }))
+        elif ext in (".mp4", ".avi", ".mov", ".mkv", ".webm"):
+            state = self._open_video_overlay(
+                path, ow, oh, loop, opacity, ox, oy, key,
+                t_translate, t_scale, t_rotate,
+            )
+            if state:
+                self._overlays.append(state)
+        else:
+            try:
+                surf = pygame.image.load(str(path)).convert_alpha()
+                surf = pygame.transform.smoothscale(surf, (ow, oh))
+                self._overlays.append(_base({
+                    "type": "static", "surf": surf, "loop": False,
+                }))
+            except Exception as error:
+                print(f"[Overlay] {error}")
+
+    def _load_overlay_gif(self, path, w, h):
+        try:
+            from PIL import Image
+        except ImportError:
+            print("[Overlay] Installez Pillow : pip install Pillow")
+            return None
+        frames = []
+        try:
+            with Image.open(path) as image:
+                for i in range(getattr(image, "n_frames", 1)):
+                    image.seek(i)
+                    duration = max(int(image.info.get("duration", 100)), 20)
+                    rgba = image.convert("RGBA")
+                    surf = pygame.image.fromstring(
+                        rgba.tobytes(), rgba.size, "RGBA"
+                    ).convert_alpha()
+                    surf = pygame.transform.smoothscale(surf, (w, h))
+                    frames.append((surf, duration))
+        except Exception as error:
+            print(f"[Overlay] GIF '{path}': {error}")
+            return None
+        return frames or None
+
+    def _open_video_overlay(self, path, w, h, loop, opacity, ox, oy, key,
+                             t_translate=None, t_scale=None, t_rotate=None):
+        try:
+            import cv2
+        except ImportError:
+            print("[Overlay] Installez opencv-python : pip install opencv-python")
+            return None
+        capture = cv2.VideoCapture(str(path))
+        if not capture.isOpened():
+            print(f"[Overlay] Impossible d'ouvrir : {path}")
+            return None
+        fps = capture.get(cv2.CAP_PROP_FPS) or 24
+        state = {
+            "key": key, "type": "video",
+            "capture": capture, "frame_ms": 1000.0 / fps,
+            "elapsed": 0.0, "loop": loop, "done": False,
+            "opacity": opacity, "x": ox, "y": oy, "w": w, "h": h,
+            "orig_w": w, "orig_h": h,
+            "current_surf": None,
+            "transform_elapsed": 0.0,
+            "t_translate": t_translate,
+            "t_scale": t_scale,
+            "t_rotate": t_rotate,
+        }
+        self._advance_overlay_video_frame(state)
+        return state
+
+    def _advance_overlay_video_frame(self, state):
+        import cv2
+        capture = state["capture"]
+        success, frame = capture.read()
+        if not success:
+            if state["loop"]:
+                capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                success, frame = capture.read()
+            else:
+                state["done"] = True
+                return
+        if not success:
+            state["done"] = True
+            return
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        height, width = frame_rgb.shape[:2]
+        surf = pygame.image.frombuffer(
+            frame_rgb.tobytes(), (width, height), "RGB"
+        ).convert()
+        state["current_surf"] = pygame.transform.smoothscale(surf, (state["w"], state["h"]))
+
+    def _tick_overlays(self, delta_ms: int):
+        for state in self._overlays:
+            if state["done"]:
+                continue
+            state["transform_elapsed"] += delta_ms
+            if state["type"] == "gif":
+                state["elapsed"] += delta_ms
+                while True:
+                    _, frame_dur = state["frames"][state["frame_idx"]]
+                    if state["elapsed"] < frame_dur:
+                        break
+                    state["elapsed"] -= frame_dur
+                    next_idx = state["frame_idx"] + 1
+                    if next_idx >= len(state["frames"]):
+                        if state["loop"]:
+                            state["frame_idx"] = 0
+                        else:
+                            state["done"] = True
+                        break
+                    state["frame_idx"] = next_idx
+            elif state["type"] == "video":
+                state["elapsed"] += delta_ms
+                while state["elapsed"] >= state["frame_ms"] and not state["done"]:
+                    state["elapsed"] -= state["frame_ms"]
+                    self._advance_overlay_video_frame(state)
+        self._overlays = [o for o in self._overlays if not o["done"]]
+
+    def _render_overlays(self):
+        for state in self._overlays:
+            if state["done"]:
+                continue
+            if state["type"] == "gif":
+                surf = state["frames"][state["frame_idx"]][0]
+            elif state["type"] == "video":
+                surf = state["current_surf"]
+            else:
+                surf = state.get("surf")
+            if surf is None:
+                continue
+
+            telap  = state["transform_elapsed"]
+            orig_w = state["orig_w"]
+            orig_h = state["orig_h"]
+
+            # -- Scale --
+            if state["t_scale"]:
+                s    = state["t_scale"]
+                prog = self._overlay_transform_progress(s, telap)
+                ease = prog * prog * (3.0 - 2.0 * prog)
+                f    = s["start"] + (s["end"] - s["start"]) * ease
+                surf = pygame.transform.smoothscale(
+                    surf, (max(1, int(orig_w * f)), max(1, int(orig_h * f)))
+                )
+
+            # -- Rotate --
+            if state["t_rotate"]:
+                surf = pygame.transform.rotate(
+                    surf, state["t_rotate"]["speed"] * telap / 1000.0
+                )
+
+            # -- Opacity --
+            if state["opacity"] < 255:
+                surf = surf.copy()
+                surf.set_alpha(state["opacity"])
+
+            # -- Position + translate (centre-based pour compenser scale/rotate) --
+            cx = state["x"] + orig_w // 2
+            cy = state["y"] + orig_h // 2
+            if state["t_translate"]:
+                t    = state["t_translate"]
+                prog = self._overlay_transform_progress(t, telap)
+                ease = prog * prog * (3.0 - 2.0 * prog)
+                cx  += int(t["dx"] * ease)
+                cy  += int(t["dy"] * ease)
+            self.screen.blit(surf, surf.get_rect(center=(cx, cy)))
 
     # ------------------------------------------------------------------
     # Choix
@@ -1087,6 +1395,7 @@ class VNApp:
                 dim_amount=self.character_dim,
             )
 
+        self._render_overlays()
         self._render_dialogue_box()
 
         if self.mode == "choice":
