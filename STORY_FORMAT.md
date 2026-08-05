@@ -560,12 +560,37 @@ Une transition bloque l'exécution jusqu'à sa fin, puis passe à l'action suiva
 
 ### Transitions disponibles
 
+#### Fondus
+
 | Nom | Effet |
 |---|---|
-| `fade_black` | L'écran devient progressivement noir |
-| `fade_white` | L'écran devient progressivement blanc |
-| `fade_in` | Le noir se dissipe pour révéler la scène |
-| `fade_in_white` | Le blanc se dissipe pour révéler la scène |
+| `fade_black` | L'écran devient progressivement noir (sortie) |
+| `fade_white` | L'écran devient progressivement blanc (sortie) |
+| `fade_in` | Le noir se dissipe pour révéler la scène (entrée) |
+| `fade_in_white` | Le blanc se dissipe pour révéler la scène (entrée) |
+| `fade_red` | Voile rouge progressif — danger, mort, tension |
+
+#### Balayages (wipe)
+
+| Nom | Effet |
+|---|---|
+| `wipe_right` | Bande noire glissant de gauche à droite |
+| `wipe_left` | Bande noire glissant de droite à gauche |
+| `wipe_down` | Bande noire glissant du haut vers le bas |
+| `wipe_up` | Bande noire glissant du bas vers le haut |
+
+#### Iris
+
+| Nom | Effet |
+|---|---|
+| `iris_close` | Le cercle visible rétrécit jusqu'au noir total |
+| `iris_open` | Un cercle s'ouvre depuis le centre pour révéler la scène |
+
+#### Dissolution
+
+| Nom | Paramètres | Effet |
+|---|---|---|
+| `dissolve` | `block_size` (px, défaut 16) | Blocs aléatoires qui noircissent progressivement |
 
 ### Ajouter une transition personnalisée
 
