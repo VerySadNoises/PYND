@@ -296,6 +296,16 @@ class VNApp:
 
         self.choices = []
         self._choice_rects = []
+        self._choice_cursor = 0  # index sélectionné au clavier / manette
+
+        # Manette : initialise les joysticks détectés au démarrage
+        pygame.joystick.init()
+        self._joysticks = [
+            pygame.joystick.Joystick(i)
+            for i in range(pygame.joystick.get_count())
+        ]
+        for joy in self._joysticks:
+            joy.init()
 
         self.mode = "running"
         self.running = True
@@ -680,6 +690,16 @@ class VNApp:
             if event.type == pygame.QUIT:
                 self.running = False
 
+            elif event.type == pygame.JOYDEVICEADDED:
+                joy = pygame.joystick.Joystick(event.device_index)
+                joy.init()
+                self._joysticks.append(joy)
+
+            elif event.type == pygame.JOYDEVICEREMOVED:
+                self._joysticks = [
+                    j for j in self._joysticks if j.get_instance_id() != event.instance_id
+                ]
+
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
@@ -691,16 +711,38 @@ class VNApp:
                     self._quick_load()
 
                 elif (
-                    event.key == pygame.K_SPACE
+                    event.key in (pygame.K_SPACE, pygame.K_RIGHT, pygame.K_RETURN)
                     and self.mode == "waiting"
                 ):
                     self.mode = "running"
 
                 elif self.mode == "choice":
-                    choice_index = event.key - pygame.K_1
+                    if event.key in (pygame.K_UP, pygame.K_LEFT):
+                        self._choice_cursor = (self._choice_cursor - 1) % len(self.choices)
+                    elif event.key in (pygame.K_DOWN, pygame.K_RIGHT):
+                        self._choice_cursor = (self._choice_cursor + 1) % len(self.choices)
+                    elif event.key in (pygame.K_SPACE, pygame.K_RETURN):
+                        self._select_choice(self._choice_cursor)
+                    else:
+                        choice_index = event.key - pygame.K_1
+                        if 0 <= choice_index < len(self.choices):
+                            self._select_choice(choice_index)
 
-                    if 0 <= choice_index < len(self.choices):
-                        self._select_choice(choice_index)
+            elif event.type == pygame.JOYBUTTONDOWN:
+                # N'importe quel bouton manette avance / confirme
+                if self.mode == "waiting":
+                    self.mode = "running"
+                elif self.mode == "choice":
+                    self._select_choice(self._choice_cursor)
+
+            elif event.type == pygame.JOYHATMOTION:
+                # Croix directionnelle manette pour naviguer dans les choix
+                if self.mode == "choice" and len(self.choices) > 0:
+                    hx, hy = event.value
+                    if hy == 1 or hx == -1:   # haut ou gauche
+                        self._choice_cursor = (self._choice_cursor - 1) % len(self.choices)
+                    elif hy == -1 or hx == 1: # bas ou droite
+                        self._choice_cursor = (self._choice_cursor + 1) % len(self.choices)
 
             elif (
                 event.type == pygame.MOUSEBUTTONDOWN
@@ -798,6 +840,7 @@ class VNApp:
                 c for c in all_choices
                 if _evaluate_condition(c.get("condition", "true"), self.variables)
             ]
+            self._choice_cursor = 0
             self.mode = "choice"
 
         elif "set" in action:
@@ -1505,14 +1548,15 @@ class VNApp:
 
             color = self._CHOICE_COLOR
 
-            if hit_rect.collidepoint(mouse_position):
+            is_cursor = index == self._choice_cursor
+            if hit_rect.collidepoint(mouse_position) or is_cursor:
                 highlight = pygame.Surface(
                     hit_rect.size,
                     pygame.SRCALPHA,
                 )
 
                 highlight.fill(
-                    (255, 255, 100, 40)
+                    (255, 255, 100, 80) if is_cursor else (255, 255, 100, 40)
                 )
 
                 self.screen.blit(
