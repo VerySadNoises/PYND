@@ -1,6 +1,42 @@
 import pygame
 from pathlib import Path
 
+# Centre x du personnage en fraction de la largeur d'écran (0.0 gauche, 1.0 droite)
+# et bas du personnage en fraction de la hauteur (0.0 haut, 1.0 bas)
+_NAMED_POSITIONS = {
+    "left":         (0.18, 0.88),
+    "l":            (0.18, 0.88),
+    "center_left":  (0.33, 0.88),
+    "cl":           (0.33, 0.88),
+    "center":       (0.50, 0.88),
+    "c":            (0.50, 0.88),
+    "center_right": (0.67, 0.88),
+    "cr":           (0.67, 0.88),
+    "right":        (0.82, 0.88),
+    "r":            (0.82, 0.88),
+}
+_DEFAULT_POS = (0.50, 0.88)
+
+
+def _parse_position(raw):
+    """
+    Retourne (x_frac, y_frac) :
+      - x_frac : centre horizontal du personnage / largeur d'écran
+      - y_frac : bas du personnage / hauteur d'écran
+
+    Formats acceptés :
+      str  -> "left" | "center_left" | "center" | "center_right" | "right"
+      dict -> {x: 0.3}  |  {x: 0.3, y: 0.9}
+    """
+    if isinstance(raw, dict):
+        return (
+            float(raw.get("x", _DEFAULT_POS[0])),
+            float(raw.get("y", _DEFAULT_POS[1])),
+        )
+    if isinstance(raw, str):
+        return _NAMED_POSITIONS.get(raw.strip().lower(), _DEFAULT_POS)
+    return _DEFAULT_POS
+
 
 class Character:
     def __init__(
@@ -28,6 +64,7 @@ class Character:
 
         self.rect = None
         self.visible = False
+        self._animation = None
 
     # ------------------------------------------------------------------
     # Chargement et redimensionnement
@@ -96,33 +133,24 @@ class Character:
             return
 
         screen_width, screen_height = screen_size
-        selected_position = (
-            position or self.default_position or "center"
-        ).lower()
-
-        margin_x = int(screen_width * 0.05)
-        bottom_offset = int(screen_height * 0.12)
-
         image_width, image_height = self.surf.get_size()
 
-        if selected_position in ("left", "l"):
-            x = margin_x
+        raw = position if position is not None else (self.default_position or "center")
+        x_frac, y_frac = _parse_position(raw)
 
-        elif selected_position in ("right", "r"):
-            x = screen_width - image_width - margin_x
+        # Centre x du personnage, puis bord gauche pour le rect
+        cx = int(screen_width * x_frac)
+        x = cx - image_width // 2
 
-        else:
-            x = (screen_width - image_width) // 2
+        # Bord bas du personnage, puis bord haut pour le rect
+        by = int(screen_height * y_frac)
+        y = by - image_height
 
-        y = screen_height - image_height - bottom_offset
+        # Garder dans les limites de l'écran
+        x = max(0, min(screen_width  - image_width,  x))
+        y = max(0, min(screen_height - image_height, y))
 
-        self.rect = pygame.Rect(
-            x,
-            y,
-            image_width,
-            image_height,
-        )
-
+        self.rect = pygame.Rect(x, y, image_width, image_height)
         self.visible = True
 
     def hide(self):
@@ -201,7 +229,13 @@ class Character:
             surface_to_draw = self._get_dimmed_surface(dim_amount)
 
         if surface_to_draw is not None:
-            screen.blit(surface_to_draw, self.rect)
+            if self._animation is not None:
+                surface_to_draw, draw_rect = self._animation.get_transform(
+                    self.rect, surface_to_draw
+                )
+            else:
+                draw_rect = self.rect
+            screen.blit(surface_to_draw, draw_rect)
 
 
 class CharacterRegistry:

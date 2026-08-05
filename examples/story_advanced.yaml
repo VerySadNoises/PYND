@@ -19,16 +19,19 @@ characters:
 scenes:
 
   # ----------------------------------------------------------
-  # Scène 1 : Arrivée — initialisation des variables globales
+  # Scène 1 : Arrivée
   # ----------------------------------------------------------
   - id: arrivee
     background: assets/bg/bg_spaceship.jpg
     music: assets/audio/Forgotten Biomes.ogg
     character_dim: 100
 
+    # Positionnement explicite : settler à gauche, pilot à droite
     characters:
-      - settler
-      - pilot
+      - id: settler
+        position: left
+      - id: pilot
+        position: right
 
     actions:
       # Initialisation de toutes les variables du joueur

@@ -7,6 +7,8 @@ import pygame
 from vn_engine.script_parser import load_story
 from vn_engine.characters import CharacterRegistry
 from vn_engine.dialogue import ActionExecutor
+from vn_engine.transitions import create as _create_transition
+from vn_engine.animations import create as _create_animation
 
 
 _VIDEO_EXTS = {
@@ -251,6 +253,7 @@ class VNApp:
         self.current_scene_id = None
         self._notification = ""
         self._notification_timer = 0
+        self._transition = None
 
         # ------------------------------------------------------------------
         # Arrière-plan
@@ -389,14 +392,17 @@ class VNApp:
 
         for entry in scene.get("characters") or []:
             if isinstance(entry, dict):
-                character_id = next(iter(entry), None)
-
-                if character_id is None:
-                    continue
-
-                character_config = entry.get(character_id) or {}
-                position = character_config.get("position")
-
+                # Format {id: "settler", position: ...}
+                if "id" in entry:
+                    character_id = entry["id"]
+                    position = entry.get("position")
+                # Format legacy {settler: {position: ...}}
+                else:
+                    character_id = next(iter(entry), None)
+                    if character_id is None:
+                        continue
+                    character_config = entry.get(character_id) or {}
+                    position = character_config.get("position")
             else:
                 character_id = entry
                 position = None
@@ -704,11 +710,35 @@ class VNApp:
                             break
 
     def _update(self):
+        delta = self.clock.get_time()
+
         if self._notification_timer > 0:
-            self._notification_timer -= self.clock.get_time()
+            self._notification_timer -= delta
             if self._notification_timer <= 0:
                 self._notification = ""
                 self._notification_timer = 0
+
+        if self._transition is not None:
+            self._transition.tick(delta)
+            if self._transition.done:
+                self._transition = None
+                self.executor.advance()
+            return
+
+        # Tick toutes les animations de personnages
+        for char in self.chars.all():
+            if char._animation is not None:
+                char._animation.tick(delta)
+                if char._animation.done:
+                    char._animation = None
+
+        # Animation bloquante : suspend l'exécuteur jusqu'à la fin
+        if self._anim_barrier is not None:
+            if self._anim_barrier.done:
+                self._anim_barrier = None
+                self.executor.advance()
+            return
+
         if self.mode == "running":
             self._execute_next()
 
@@ -817,6 +847,39 @@ class VNApp:
 
         elif "music" in action:
             self._play_music(action["music"])
+            self.executor.advance()
+
+        elif "transition" in action:
+            spec = action["transition"]
+            if isinstance(spec, str):
+                name, duration = spec, 500
+            else:
+                name     = (spec or {}).get("type", "fade_black")
+                duration = int((spec or {}).get("duration", 500))
+            t = _create_transition(name, duration)
+            if t is not None:
+                self._transition = t
+            else:
+                print(f"[VN] Transition inconnue : {name!r}")
+                self.executor.advance()
+
+        elif "animate" in action:
+            spec     = action["animate"] or {}
+            char_id  = spec.get("character")
+            anim_type = spec.get("type", "shake")
+            duration = int(spec.get("duration", 500))
+            blocking = spec.get("wait", True)
+            kwargs   = {
+                k: v for k, v in spec.items()
+                if k not in ("character", "type", "duration", "wait")
+            }
+            anim = _create_animation(anim_type, duration, **kwargs)
+            char = self.chars.get(char_id) if char_id else None
+            if anim and char:
+                char._animation = anim
+                if blocking:
+                    self._anim_barrier = anim
+                    return  # executor.advance() appelé quand done
             self.executor.advance()
 
         elif "if" in action:
@@ -1011,6 +1074,9 @@ class VNApp:
             self._render_choices()
 
         self._render_notification()
+
+        if self._transition is not None:
+            self._transition.render(self.screen)
 
         pygame.display.flip()
 

@@ -324,6 +324,81 @@ Les fichiers de sauvegarde sont au format JSON dans le dossier `saves/`.
 
 ---
 
+## Positionner les personnages
+
+Les personnages sont placés selon deux axes :
+- **x** : centre horizontal du personnage, en fraction de la largeur d'écran (0.0 = gauche, 1.0 = droite).
+- **y** : bas du personnage, en fraction de la hauteur d'écran (0.0 = haut, 1.0 = bas — défaut : 0.88).
+
+### Positions nommées (5 emplacements prédéfinis)
+
+| Nom | Alias | Centre x |
+|---|---|---|
+| `left` | `l` | 18 % |
+| `center_left` | `cl` | 33 % |
+| `center` | `c` | 50 % |
+| `center_right` | `cr` | 67 % |
+| `right` | `r` | 82 % |
+
+```yaml
+characters:
+  perso_a:
+    name: Alice
+    image: assets/characters/alice.png
+    position: left          # position par défaut du personnage
+```
+
+### Positionnement dans une scène (surcharge la définition)
+
+```yaml
+scenes:
+  - id: confrontation
+    characters:
+      - id: alice
+        position: center_left     # nomé
+      - id: bob
+        position: center_right
+      - id: narrateur
+        position:
+          x: 0.50                 # centre horizontal exact
+          y: 0.70                 # plus haut que les autres
+```
+
+### Position numérique libre
+
+Utilise un dict `{x, y}` pour un placement précis :
+
+```yaml
+# 5 personnages côte à côte sans superposition
+characters:
+  - id: perso_a
+    position: {x: 0.10}
+  - id: perso_b
+    position: {x: 0.30}
+  - id: perso_c
+    position: {x: 0.50}
+  - id: perso_d
+    position: {x: 0.70}
+  - id: perso_e
+    position: {x: 0.90}
+```
+
+### Changer la position en cours de scène (`show`)
+
+```yaml
+- show:
+    id: alice
+    position: center          # nomé
+
+- show:
+    id: alice
+    position:
+      x: 0.35                 # numérique
+      y: 0.85
+```
+
+---
+
 ## Afficher / cacher des personnages
 
 ### Afficher un personnage (déjà défini dans `characters`)
@@ -447,17 +522,161 @@ la scène — la partie reprend exactement dans le même état.
       audio: true
 ```
 
+---
+
+## Transitions entre scènes
+
+Une transition bloque l'exécution jusqu'à sa fin, puis passe à l'action suivante.
+
+### Syntaxe courte (durée par défaut : 500 ms)
 
 ```yaml
-# Opération pour une variable
-# Initialiser
-- set:
-    money: 150
-    reputation: 0
+- transition: fade_black
+```
 
-# Ajouter / soustraire
-- set:
-    money: "money + 50"
+### Avec durée personnalisée
+
+```yaml
+- transition:
+    type: fade_white
+    duration: 800
+```
+
+### Enchaînement typique : sortie → scène → entrée
+
+```yaml
+# Fin de la scène A
+- transition:
+    type: fade_black
+    duration: 600
+- goto: foret
+
+# Début de la scène foret
+- transition:
+    type: fade_in
+    duration: 400
+- captain: "Nous voilà dans la forêt."
+```
+
+### Transitions disponibles
+
+| Nom | Effet |
+|---|---|
+| `fade_black` | L'écran devient progressivement noir |
+| `fade_white` | L'écran devient progressivement blanc |
+| `fade_in` | Le noir se dissipe pour révéler la scène |
+| `fade_in_white` | Le blanc se dissipe pour révéler la scène |
+
+### Ajouter une transition personnalisée
+
+Dans `src/vn_engine/transitions.py` :
+
+```python
+from vn_engine.transitions import BaseTransition, register
+
+@register("flash_rouge")
+class FlashRouge(BaseTransition):
+    def _alpha(self): return int((1.0 - abs(self.progress * 2 - 1)) * 255)
+    def _color(self): return (255, 0, 0)
+```
+
+---
+
+## Animations de personnages
+
+Applique un effet visuel à un personnage. Bloquant par défaut (`wait: true`).
+
+### Shake (tremblement)
+
+```yaml
+- animate:
+    character: settler
+    type: shake
+    duration: 400
+    intensity: 15      # amplitude en pixels (défaut : 12)
+```
+
+### Scale up (gonflement pulsé)
+
+```yaml
+- animate:
+    character: captain
+    type: scale_up
+    duration: 500
+    scale: 1.2         # facteur max (défaut : 1.15)
+```
+
+### Bounce (saut)
+
+```yaml
+- animate:
+    character: settler
+    type: bounce
+    duration: 450
+    height: 40         # hauteur en pixels (défaut : 30)
+```
+
+### Translate (nudge et retour)
+
+```yaml
+- animate:
+    character: captain
+    type: translate
+    dx: 0
+    dy: -25            # décalage en pixels
+    duration: 400
+```
+
+### Slide in (entrée depuis un côté)
+
+```yaml
+- animate:
+    character: settler
+    type: slide_in
+    dx: 150            # démarre 150 px à droite de sa position
+    dy: 0
+    duration: 600
+```
+
+### Non-bloquant : animation en arrière-plan
+
+```yaml
+# wait: false → l'exécuteur continue sans attendre la fin
+- animate:
+    character: settler
+    type: shake
+    duration: 800
+    wait: false
+- settler: "Ce dialogue s'affiche pendant que le shake se joue."
+```
+
+### Animations disponibles
+
+| Nom | Paramètres | Effet |
+|---|---|---|
+| `shake` | `intensity` (px, défaut 12) | Tremblement qui s'atténue |
+| `scale_up` | `scale` (facteur, défaut 1.15) | Gonflement pulsé |
+| `bounce` | `height` (px, défaut 30) | Saut parabolique |
+| `translate` | `dx`, `dy` (px, défaut 0/-20) | Nudge et retour |
+| `slide_in` | `dx`, `dy` (px, défaut 80/0) | Glissement d'entrée |
+
+### Ajouter une animation personnalisée
+
+Dans `src/vn_engine/animations.py` :
+
+```python
+from vn_engine.animations import BaseAnimation, register
+import pygame
+
+@register("rotation")
+class Rotation(BaseAnimation):
+    def get_transform(self, rect, surf):
+        angle = self.progress * 15   # 15° max
+        rotated = pygame.transform.rotate(surf, angle)
+        return rotated, rotated.get_rect(center=rect.center)
+```
+
+
     reputation: "reputation + 1"
 
 # Multiplier, diviser

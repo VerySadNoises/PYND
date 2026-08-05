@@ -3,7 +3,7 @@ characters:
   settler:
     name: Settler
     image: assets/characters/Settler2.png
-    position: left
+    position: left        # position par défaut : left | center_left | center | center_right | right
 
   captain:
     name: Capitaine
@@ -14,14 +14,14 @@ scenes:
   - id: intro
     music: assets/audio/Forgotten Biomes.ogg
     background: assets/bg/bg_spaceship.jpg
-
-    # 0 = aucun assombrissement
-    # 255 = personnage entièrement noir
     character_dim: 120
 
+    # Positionnement explicite dans la scène (surcharge la définition du personnage)
     characters:
-      - settler
-      - captain
+      - id: settler
+        position: left
+      - id: captain
+        position: right
 
     actions:
       - settler: "Welcome travelers! Are you ready for the journey?"
