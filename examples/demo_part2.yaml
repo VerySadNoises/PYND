@@ -1,0 +1,207 @@
+# ============================================================
+#  La Station Fantôme — Partie 2
+#
+#  Features démontrées :
+#    - réception depuis goto inter-fichiers (variables héritées)
+#    - init de secours si lancé en standalone (if condition: None)
+#    - positions libres {x: float} et nommées
+#    - if/else imbriqués sur plusieurs niveaux
+#    - animations : slide_in, shake, bounce, scale_up
+#    - transitions : fade_in, fade_black
+#    - choix conditionnels (credits >= 30, approche == signal)
+#    - interpolation dans tous les dialogues
+#    - fin multiple selon valeur de oxygene
+# ============================================================
+
+characters:
+  pilot:
+    name: Pilote
+    image: assets/characters/Pilot2.png
+    position: right
+
+  settler:
+    name: Alma
+    image: assets/characters/Settler2.png
+    position: left
+
+# ============================================================
+scenes:
+
+  # ----------------------------------------------------------
+  # Scène 1 : La salle des machines
+  # Arrive depuis demo_part1.yaml#couloir — variables héritées.
+  # Si lancé en standalone, le bloc if-None initialise les variables.
+  # ----------------------------------------------------------
+  - id: salle_machines
+    background: assets/bg/bg_spaceship.jpg
+    music: assets/audio/Wanderer's Tale.ogg
+    character_dim: 100
+
+    characters:
+      - id: settler
+        position: center_left
+      - id: pilot
+        position: center_right
+
+    actions:
+      # ----- Init de secours (standalone) -----
+      # oxygene vaut None seulement si aucune variable n'a été héritée
+      - if:
+          condition: "oxygene == None"
+          then:
+            - set:
+                oxygene: 85
+                credits: 50
+                approche: reparer
+                nom_joueur: Commandant
+                a_vu_alerte: false
+
+      - transition: fade_in
+
+      # Alma réapparaît en glissant
+      - animate:
+          id: settler
+          name: slide_in
+          duration: 500
+          blocking: true
+
+      - pilot: "On y est. Niveau d'oxygène actuel : {oxygene} %."
+      - settler: "Crédits restants : {credits}. Ça va se jouer serré, {nom_joueur}."
+
+      # Dialogue et difficulté selon l'approche héritée de la partie 1
+      - if:
+          condition: "approche == reparer"
+          then:
+            - animate:
+                id: pilot
+                name: scale_up
+                duration: 600
+                blocking: true
+            - pilot: "Je connais ce générateur. On peut le relancer en 5 minutes."
+            - set:
+                difficulte: facile
+          else:
+            - animate:
+                id: settler
+                name: shake
+                duration: 500
+                blocking: true
+            - settler: "On dépend des secours. S'ils tardent, on devra improviser."
+            - set:
+                difficulte: difficile
+
+      - pilot: "Voilà le tableau de contrôle. Qu'est-ce qu'on fait ?"
+
+      - choice:
+          - text: "Court-circuiter le système (dangereux, gratuit)"
+            set:
+              oxygene: "oxygene - 10"
+            actions:
+              - animate:
+                  id: pilot
+                  name: shake
+                  duration: 700
+                  blocking: true
+              - pilot: "Ça a failli exploser ! Mais... ça marche. -{10} % d'oxygène."
+            goto: conclusion
+
+          # Ce choix n'apparaît que si on a assez de crédits
+          - text: "Utiliser le module de réparation (30 crédits)"
+            condition: "credits >= 30"
+            set:
+              credits: "credits - 30"
+              oxygene: "oxygene + 5"
+            actions:
+              - animate:
+                  id: settler
+                  name: bounce
+                  duration: 600
+                  blocking: true
+              - settler: "Propre et efficace. Le générateur reprend vie. +5 % d'oxygène."
+            goto: conclusion
+
+          # Ce choix n'apparaît que si on avait choisi le signal en partie 1
+          - text: "Attendre les secours — signal confirmé"
+            condition: "approche == signal"
+            actions:
+              - settler: "Signal confirmé. Ils arrivent dans 10 minutes. On tient bon."
+            goto: conclusion
+
+  # ----------------------------------------------------------
+  # Scène 2 : Conclusion — fin multiple selon oxygène final
+  # ----------------------------------------------------------
+  - id: conclusion
+    background: assets/bg/bg_spaceship.jpg
+    music: assets/audio/Floating Dream.ogg
+    character_dim: 110
+
+    # Position libre {x} pour varier le placement
+    characters:
+      - id: settler
+        position:
+          x: 0.28
+      - id: pilot
+        position:
+          x: 0.72
+
+    actions:
+      - transition: fade_black
+
+      - settler: "Bilan final — Oxygène : {oxygene} %. Crédits : {credits}."
+
+      # Fin triomphale
+      - if:
+          condition: "oxygene >= 80"
+          then:
+            - animate:
+                id: pilot
+                name: bounce
+                duration: 700
+                blocking: true
+            - animate:
+                id: settler
+                name: scale_up
+                duration: 600
+                blocking: false
+            - pilot: "Mission réussie, {nom_joueur} ! La station est sauvée haut la main."
+            - settler: "Je savais qu'on y arriverait. Bien joué."
+          else:
+            # Fin intermédiaire
+            - if:
+                condition: "oxygene >= 50"
+                then:
+                  - animate:
+                      id: pilot
+                      name: translate
+                      duration: 500
+                      blocking: true
+                  - pilot: "De justesse, {nom_joueur}... mais on s'en est sortis. Bon travail."
+                  - settler: "La station respire à nouveau. Littéralement."
+                else:
+                  # Fin difficile
+                  - animate:
+                      id: pilot
+                      name: shake
+                      duration: 600
+                      blocking: true
+                  - pilot: "C'était trop serré. On a survécu, mais à quel prix ?"
+                  - settler: "On reconstruira, {nom_joueur}. Toujours."
+
+      - settler: "La station reprend vie. Les lumières se rallument une à une."
+
+      - choice:
+          - text: "Repartir vers les étoiles"
+            actions:
+              - transition: fade_black
+              - pilot: "À la prochaine aventure, {nom_joueur}."
+              - settler: "L'univers vous attend. Bon voyage."
+              - hide:
+
+          - text: "Rester pour reconstruire la station"
+            actions:
+              - animate:
+                  id: settler
+                  name: scale_up
+                  duration: 500
+              - settler: "On va avoir besoin de vous ici encore longtemps, {nom_joueur}."
+              - pilot: "La station a de la chance de vous avoir."

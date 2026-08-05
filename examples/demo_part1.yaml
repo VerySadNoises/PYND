@@ -1,0 +1,190 @@
+# ============================================================
+#  La Station Fantôme — Partie 1
+#
+#  Features démontrées :
+#    - positionnement nommé (left, center_left, center_right, right)
+#    - variables : set, arithmétique, interpolation dans les dialogues
+#    - transitions : fade_in, fade_black
+#    - animations : slide_in, bounce, shake, translate, scale_up
+#      (blocking et non-blocking)
+#    - if / else imbriqués + condition sur variable
+#    - choix conditionnels (condition:)
+#    - show / hide en cours de scène
+#    - goto inter-fichiers vers demo_part2.yaml
+#    - sauvegarde / chargement : F5 / F9
+# ============================================================
+
+characters:
+  pilot:
+    name: Pilote
+    image: assets/characters/Pilot2.png
+    position: right
+
+  settler:
+    name: Alma
+    image: assets/characters/Settler2.png
+    position: left
+
+# ============================================================
+scenes:
+
+  # ----------------------------------------------------------
+  # Scène 1 : Réveil sur la station — init des variables
+  # ----------------------------------------------------------
+  - id: reveil
+    background: assets/bg/bg_spaceship.jpg
+    music: assets/audio/Strange Worlds.ogg
+    character_dim: 100
+
+    # Personnages positionnés explicitement pour cette scène
+    characters:
+      - id: settler
+        position: left
+      - id: pilot
+        position: right
+
+    actions:
+      # ----- Variables globales de la session -----
+      - set:
+          oxygene: 100
+          credits: 50
+          nom_joueur: Commandant
+          a_vu_alerte: false
+          approche: aucune
+
+      # ----- Ouverture -----
+      - transition: fade_in
+
+      # Entrées animées des personnages (slide_in en parallèle)
+      - animate:
+          id: settler
+          name: slide_in
+          duration: 600
+          blocking: false
+      - animate:
+          id: pilot
+          name: slide_in
+          duration: 600
+          blocking: true
+
+      - settler: "Bon réveil, {nom_joueur}. Les lumières de secours sont en marche."
+      - pilot: "On a un problème. Niveau d'oxygène : {oxygene} %. Le générateur principal est hors ligne."
+
+      # Le choix définit la variable `approche`, utilisée plus tard
+      - choice:
+          - text: "Réparer le générateur (risqué)"
+            set:
+              approche: reparer
+              credits: "credits - 10"
+            actions:
+              - pilot: "Brave. On va avoir besoin d'outils — 10 crédits de matériel."
+            goto: couloir
+
+          - text: "Envoyer un signal de détresse"
+            set:
+              approche: signal
+            actions:
+              - settler: "Bonne idée. J'active l'émetteur longue portée."
+            goto: couloir
+
+          - text: "Attendre et économiser l'oxygène"
+            set:
+              approche: attendre
+            actions:
+              - pilot: "Risqué... mais cohérent. On surveille les réserves."
+            goto: couloir
+
+  # ----------------------------------------------------------
+  # Scène 2 : Le couloir — arithmétique, if/else, choix conditionnels
+  # ----------------------------------------------------------
+  - id: couloir
+    background: assets/bg/bg_spaceship.jpg
+    music: assets/audio/Polar Lights.ogg
+    character_dim: 110
+
+    # Positions décalées vers le centre pour une scène plus intime
+    characters:
+      - id: settler
+        position: center_left
+      - id: pilot
+        position: center_right
+
+    actions:
+      # Consommation d'oxygène — opération arithmétique sur variable
+      - set:
+          oxygene: "oxygene - 15"
+
+      - transition: fade_black
+
+      - settler: "Oxygène restant : {oxygene} %. Dépêchons-nous, {nom_joueur}."
+
+      # Dialogue conditionnel selon l'approche choisie en scène 1
+      - if:
+          condition: "approche == reparer"
+          then:
+            - animate:
+                id: pilot
+                name: bounce
+                duration: 500
+                blocking: true
+            - pilot: "Les outils sont prêts. Le générateur est au niveau C — allons-y !"
+          else:
+            - animate:
+                id: settler
+                name: translate
+                duration: 400
+                blocking: true
+            - settler: "Signal envoyé. Les secours arrivent dans ~40 minutes."
+
+      # Alerte si oxygène bas — met à jour a_vu_alerte pour un choix conditionnel
+      - if:
+          condition: "oxygene < 90"
+          then:
+            - set:
+                a_vu_alerte: true
+            - animate:
+                id: pilot
+                name: shake
+                duration: 600
+                blocking: true
+            - pilot: "Alerte ! Sous 85 % c'est critique. On doit faire vite."
+
+      - settler: "Il faut prendre une décision avant d'aller plus loin."
+
+      - choice:
+          - text: "Prendre la combinaison de protection (+20 % d'oxygène)"
+            set:
+              oxygene: "oxygene + 20"
+            actions:
+              - settler: "Excellente initiative. Réserve personnelle activée."
+              - animate:
+                  id: settler
+                  name: scale_up
+                  duration: 500
+
+          - text: "Laisser la combinaison — gagner du temps"
+            actions:
+              - pilot: "D'accord. On fait vite alors."
+              - animate:
+                  id: pilot
+                  name: translate
+                  duration: 400
+
+          # Ce choix n'apparaît que si l'alerte d'oxygène a été déclenchée
+          - text: "Chercher une bouteille d'urgence (+10 % d'oxygène)"
+            condition: "a_vu_alerte == true"
+            set:
+              oxygene: "oxygene + 10"
+            actions:
+              - pilot: "+10 % récupérés dans le placard d'urgence. Bien joué."
+
+      # hide : on cache Alma pour la transition vers la partie 2
+      - hide:
+          id: settler
+
+      - pilot: "La salle des machines est au bout du couloir. Allons-y."
+
+      - transition: fade_black
+
+      # Goto inter-fichiers : les variables oxygene / credits / approche sont conservées
+      - goto: "demo_part2.yaml#salle_machines"
