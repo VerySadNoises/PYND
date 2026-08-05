@@ -273,3 +273,20 @@ class Hover(BaseAnimation):
     def get_transform(self, rect, surf):
         dy = math.sin(self.progress * math.pi * 2 * self.cycles) * self.height
         return surf, rect.move(0, int(dy))
+
+
+@register("_move_to")
+class _MoveTo(BaseAnimation):
+    """Glissement du rect depuis (start_x, start_y) vers la position cible — usage interne."""
+
+    def __init__(self, duration_ms: int = 400, start_x: int = 0, start_y: int = 0):
+        super().__init__(duration_ms)
+        self.start_x = int(start_x)
+        self.start_y = int(start_y)
+
+    def get_transform(self, rect, surf):
+        t = self.progress
+        ease = t * t * (3.0 - 2.0 * t)  # smooth-step
+        x = int(self.start_x + (rect.x - self.start_x) * ease)
+        y = int(self.start_y + (rect.y - self.start_y) * ease)
+        return surf, pygame.Rect(x, y, rect.width, rect.height)

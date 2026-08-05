@@ -817,13 +817,31 @@ class VNApp:
         elif "show" in action:
             show_data = action["show"] or {}
             character_id = show_data.get("id")
+            move_duration = int(show_data.get("duration", 0))
 
             if character_id:
+                char = self.chars.get(character_id)
+                old_rect = (
+                    char.rect.copy()
+                    if (char and char.rect and char.visible and move_duration > 0)
+                    else None
+                )
                 self.chars.show(
                     character_id,
                     (self.W, self.H),
                     position=show_data.get("position"),
                 )
+                if char and old_rect is not None and char.rect:
+                    anim = _create_animation(
+                        "_move_to", move_duration,
+                        start_x=old_rect.x, start_y=old_rect.y,
+                    )
+                    if anim:
+                        char._animation = anim
+                        if show_data.get("blocking", False):
+                            self._anim_barrier = anim
+                            self.executor.advance()
+                            return
 
             self.executor.advance()
 
