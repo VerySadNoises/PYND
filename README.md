@@ -28,10 +28,10 @@ python tools/cli.py run examples/demo_part1.yaml
 Quickstart (macOS / Linux):
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python tools/cli.py run examples/demo_part1.yaml
+python3 tools/cli.py run examples/demo_part1.yaml
 ```
 
 Fichiers importants créés:

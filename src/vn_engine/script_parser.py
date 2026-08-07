@@ -1,10 +1,16 @@
+from __future__ import annotations
+
 import yaml
 from pathlib import Path
 
-_RESERVED = {"say", "choice", "set", "jump", "goto", "show", "hide", "background", "wait", "if", "music", "transition", "animate", "sfx", "stop_sfx", "overlay", "stop_overlay"}
+_RESERVED: frozenset[str] = frozenset({
+    "say", "choice", "set", "jump", "goto", "show", "hide",
+    "background", "wait", "if", "music", "transition",
+    "animate", "sfx", "stop_sfx", "overlay", "stop_overlay",
+})
 
 
-def _normalize_actions(actions, char_ids):
+def _normalize_actions(actions: list | None, char_ids: set[str]) -> list:
     """Recursively convert shorthand `{char_id: "text"}` to `{say: {speaker, text}}`."""
     result = []
     for action in (actions or []):
@@ -42,7 +48,7 @@ def _normalize_actions(actions, char_ids):
     return result
 
 
-def load_story(path):
+def load_story(path: str | Path) -> dict:
     """Load a YAML story file; return {"characters": dict, "scenes": dict}."""
     path = Path(path)
     if not path.exists():

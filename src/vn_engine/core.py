@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import ast
 import json
 from pathlib import Path
+from typing import Any
 
 import pygame
 
@@ -21,14 +24,16 @@ _VIDEO_EXTS = {
 
 
 class SaveManager:
-    def __init__(self, save_dir="saves"):
+    """Gère la persistance des sauvegardes dans des fichiers JSON numérotés par slot."""
+
+    def __init__(self, save_dir: str | Path = "saves") -> None:
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(
             parents=True,
             exist_ok=True,
         )
 
-    def save(self, slot, data):
+    def save(self, slot: int, data: dict) -> None:
         path = self.save_dir / f"slot_{slot}.json"
 
         path.write_text(
@@ -36,7 +41,7 @@ class SaveManager:
             encoding="utf-8",
         )
 
-    def load(self, slot):
+    def load(self, slot: int) -> dict | None:
         path = self.save_dir / f"slot_{slot}.json"
 
         if not path.exists():
@@ -51,7 +56,7 @@ class SaveManager:
 # Évaluation sécurisée des conditions (sans eval)
 # ---------------------------------------------------------------------------
 
-def _eval_ast_node(node, variables, _rhs=False):
+def _eval_ast_node(node: ast.AST, variables: dict, _rhs: bool = False) -> Any:
     """Évalue récursivement un nœud AST Python contre un dict de variables."""
     if isinstance(node, ast.BoolOp):
         values = [_eval_ast_node(v, variables) for v in node.values]
@@ -135,7 +140,7 @@ def _eval_ast_node(node, variables, _rhs=False):
     raise ValueError(f"Nœud AST non supporté : {type(node).__name__}")
 
 
-def _evaluate_condition(expr, variables):
+def _evaluate_condition(expr: object, variables: dict) -> bool:
     """Retourne True si la condition str est vérifiée, False sinon."""
     if not expr:
         return True
@@ -151,7 +156,7 @@ def _evaluate_condition(expr, variables):
         return True
 
 
-def _evaluate_expression(expr, variables):
+def _evaluate_expression(expr: object, variables: dict) -> Any:
     """Évalue une expression pour l'action set (arithmétique, variable, littéral)."""
     if not isinstance(expr, str):
         return expr
@@ -164,10 +169,10 @@ def _evaluate_expression(expr, variables):
         return expr
 
 
-def _interpolate(text, variables):
+def _interpolate(text: object, variables: dict) -> str:
     """Remplace {variable} dans le texte par la valeur de la variable."""
     if not isinstance(text, str) or "{" not in text:
-        return text
+        return str(text) if text is not None else ""
 
     class _SafeDict(dict):
         def __missing__(self, key):  # laisse {key} intact si la variable n'existe pas
@@ -180,6 +185,19 @@ def _interpolate(text, variables):
 
 
 class VNApp:
+    """
+    Moteur principal du visual novel.
+
+    Cycle de vie :
+        app = VNApp("story.yaml")
+        app.run()   # boucle principale (bloquante jusqu'à la fin ou fermeture)
+
+    Système de modes :
+        "running" → l'exécuteur traite les actions automatiquement.
+        "waiting" → un dialogue est affiché, on attend un clic / touche du joueur.
+        "choice"  → des choix sont affichés, on attend que le joueur en sélectionne un.
+    """
+    # Dimensions et couleurs de la boîte de dialogue
     _DLGBOX_H = 200
     _DLGBOX_COLOR = (10, 10, 20, 210)
     _SPEAKER_COLOR = (255, 220, 100)
@@ -189,11 +207,11 @@ class VNApp:
 
     def __init__(
         self,
-        story_path,
-        width=1280,
-        height=720,
-        base_dir=None,
-    ):
+        story_path: str | Path,
+        width: int = 1280,
+        height: int = 720,
+        base_dir: str | Path | None = None,
+    ) -> None:
         pygame.init()
 
         try:
@@ -209,11 +227,11 @@ class VNApp:
         # Réserve 16 canaux : canal 0 = réservé musique, 1-15 = effets sonores
         pygame.mixer.set_num_channels(16)
 
-        self.W = width
-        self.H = height
+        self.width = width
+        self.height = height
 
         self.screen = pygame.display.set_mode(
-            (self.W, self.H)
+            (self.width, self.height)
         )
 
         pygame.display.set_caption("VN Engine")
@@ -249,16 +267,16 @@ class VNApp:
         self._loaded_file_keys = {str(Path(story_path).resolve())}
         self._extra_files = []  # chemins relatifs pour la sauvegarde
 
-        self.variables = {}
+        self.variables: dict = {}          # variables de script accessibles dans les conditions/set
         self.save_manager = SaveManager()
-        self.executor = ActionExecutor()
+        self.executor = ActionExecutor()    # parcourt la liste d'actions de la scène courante
 
-        self.current_scene_id = None
-        self._notification = ""
-        self._notification_timer = 0
-        self._transition = None
-        self._anim_barrier = None
-        self._overlays: list = []  # effets visuels superposés (GIF / MP4 / image)
+        self.current_scene_id: str | None = None
+        self._notification = ""             # texte du toast temporaire (sauvegarde, chargement…)
+        self._notification_timer = 0        # millisecondes restantes avant effacement
+        self._transition = None             # transition en cours (bloque l'exécuteur)
+        self._anim_barrier = None           # animation bloquante en cours (bloque l'exécuteur)
+        self._overlays: list[dict] = []  # effets visuels superposés (GIF / MP4 / image)
 
         # ------------------------------------------------------------------
         # Arrière-plan
@@ -307,8 +325,8 @@ class VNApp:
         for joy in self._joysticks:
             joy.init()
 
-        self.mode = "running"
-        self.running = True
+        self.mode = "running"   # voir docstring de VNApp pour les valeurs possibles
+        self.running = True      # False arrête la boucle principale
 
         first_scene_id = next(iter(self.scenes), None)
 
@@ -322,7 +340,9 @@ class VNApp:
     # Chargement d'une scène
     # ------------------------------------------------------------------
 
-    def _parse_goto_destination(self, destination):
+    def _parse_goto_destination(
+        self, destination: str | dict | None
+    ) -> tuple[str | None, str | None]:
         """Retourne (fichier_ou_None, scene_id_ou_None) depuis un goto."""
         if isinstance(destination, dict):
             return destination.get("file"), destination.get("scene")
@@ -333,7 +353,7 @@ class VNApp:
             return destination, None
         return None, destination
 
-    def _load_extra_story(self, file_ref):
+    def _load_extra_story(self, file_ref: str) -> str | None:
         """
         Charge un fichier YAML supplémentaire et fusionne ses personnages
         et scènes dans la partie en cours. Retourne l'id de la première scène
@@ -372,7 +392,8 @@ class VNApp:
 
         return next(iter(story["scenes"]), None)
 
-    def _load_scene(self, scene_id):
+    def _load_scene(self, scene_id: str) -> None:
+        """Initialise l'état complet du moteur pour la scène demandée (fond, musique, personnages)."""
         scene = self.scenes.get(scene_id)
 
         if scene is None:
@@ -424,7 +445,7 @@ class VNApp:
 
             self.chars.show(
                 character_id,
-                (self.W, self.H),
+                (self.width, self.height),
                 position=position,
             )
 
@@ -445,7 +466,8 @@ class VNApp:
     # Chargement de l'arrière-plan
     # ------------------------------------------------------------------
 
-    def _load_background(self, bg_spec):
+    def _load_background(self, bg_spec: str | dict | None) -> None:
+        """Libère le fond actuel et charge le nouveau (image, GIF animé ou vidéo)."""
         if self._bg_video is not None:
             self._bg_video.release()
 
@@ -515,13 +537,14 @@ class VNApp:
 
                 self.current_bg = pygame.transform.scale(
                     surface,
-                    (self.W, self.H),
+                    (self.width, self.height),
                 )
 
         except Exception as error:
             print(f"[BG] {error}")
 
-    def _open_video(self, path, audio=False):
+    def _open_video(self, path: Path, audio: bool = False) -> None:
+        """Ouvre une vidéo avec OpenCV et optionnellement son audio via ffpyplayer."""
         try:
             import cv2
         except ImportError:
@@ -543,7 +566,7 @@ class VNApp:
             fps = 24
 
         self._bg_video = capture
-        self._bg_video_ms = 1000.0 / fps
+        self._bg_video_ms = 1000.0 / fps  # durée d'une frame vidéo en ms
 
         if audio:
             try:
@@ -568,7 +591,8 @@ class VNApp:
 
         self._advance_video_frame()
 
-    def _advance_video_frame(self):
+    def _advance_video_frame(self) -> None:
+        """Lit la prochaine frame vidéo et la place dans current_bg ; rebobine en fin de fichier."""
         if self._bg_video is None:
             return
 
@@ -589,7 +613,7 @@ class VNApp:
 
         frame_rgb = cv2.cvtColor(
             frame,
-            cv2.COLOR_BGR2RGB,
+            cv2.COLOR_BGR2RGB,  # OpenCV lit en BGR, pygame attend du RGB
         )
 
         height, width = frame_rgb.shape[:2]
@@ -602,10 +626,12 @@ class VNApp:
 
         self.current_bg = pygame.transform.scale(
             surface,
-            (self.W, self.H),
+            (self.width, self.height),
         )
 
-    def _load_gif_frames(self, path):
+    def _load_gif_frames(
+        self, path: Path
+    ) -> list[tuple[pygame.Surface, int]] | None:
         """
         Retourne une liste de tuples :
             (surface, durée_en_ms)
@@ -645,7 +671,7 @@ class VNApp:
 
                     surface = pygame.transform.scale(
                         surface,
-                        (self.W, self.H),
+                        (self.width, self.height),
                     )
 
                     frames.append(
@@ -665,7 +691,8 @@ class VNApp:
     # Boucle principale
     # ------------------------------------------------------------------
 
-    def run(self):
+    def run(self) -> None:
+        """Boucle principale : gère les événements, met à jour la logique, dessine à 60 fps."""
         while self.running:
             self._handle_events()
             self._update()
@@ -685,7 +712,8 @@ class VNApp:
         pygame.mixer.music.stop()
         pygame.quit()
 
-    def _handle_events(self):
+    def _handle_events(self) -> None:
+        """Traite la file d'événements pygame (clavier, souris, manette, fermeture)."""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
@@ -757,7 +785,8 @@ class VNApp:
                             self._select_choice(index)
                             break
 
-    def _update(self):
+    def _update(self) -> None:
+        """Avance la logique du jeu d'une frame : transitions, animations, puis prochaine action."""
         delta = self.clock.get_time()
 
         if self._notification_timer > 0:
@@ -768,6 +797,7 @@ class VNApp:
 
         self._tick_overlays(delta)
 
+        # Une transition bloque l'exécuteur : on attend qu'elle se termine
         if self._transition is not None:
             self._transition.tick(delta)
             if self._transition.done:
@@ -782,7 +812,7 @@ class VNApp:
                 if char._animation.done:
                     char._animation = None
 
-        # Animation bloquante : suspend l'exécuteur jusqu'à la fin
+        # Une animation bloquante suspend l'exécuteur jusqu'à sa fin
         if self._anim_barrier is not None:
             if self._anim_barrier.done:
                 self._anim_barrier = None
@@ -792,7 +822,8 @@ class VNApp:
         if self.mode == "running":
             self._execute_next()
 
-    def _execute_next(self):
+    def _execute_next(self) -> None:
+        """Lit et dispatche l'action courante ; arrête le jeu si la scène est terminée."""
         if self.executor.finished:
             self.running = False
             return
@@ -809,7 +840,15 @@ class VNApp:
     # Exécution des actions
     # ------------------------------------------------------------------
 
-    def _dispatch(self, action):
+    def _dispatch(self, action: dict) -> None:
+        """
+        Interprète une action YAML et met à jour l'état du moteur.
+
+        Chaque clé reconnue (say, choice, set, goto…) correspond à une commande.
+        L'exécuteur est avancé après traitement, sauf pour les actions bloquantes
+        (transition, animation blocking, dialogue) où c'est l'événement joueur
+        ou la fin de l'animation qui déclenche l'avance.
+        """
         if not isinstance(action, dict):
             self.executor.advance()
             return
@@ -878,7 +917,7 @@ class VNApp:
                 )
                 self.chars.show(
                     character_id,
-                    (self.W, self.H),
+                    (self.width, self.height),
                     position=show_data.get("position"),
                 )
                 if char and old_rect is not None and char.rect:
@@ -989,7 +1028,8 @@ class VNApp:
     # Musique
     # ------------------------------------------------------------------
 
-    def _play_music(self, spec):
+    def _play_music(self, spec: str | dict | None) -> None:
+        """Charge et démarre une musique en boucle infinie ; `spec` peut être un chemin ou un dict {file, volume}."""
         if not pygame.mixer.get_init():
             return
 
@@ -1034,7 +1074,8 @@ class VNApp:
     # Effets sonores (SFX)
     # ------------------------------------------------------------------
 
-    def _play_sfx(self, spec):
+    def _play_sfx(self, spec: str | dict | None) -> None:
+        """Joue un effet sonore sur un canal libre ; `spec` peut être un chemin ou un dict {file, volume, loop}."""
         if not pygame.mixer.get_init():
             return
         if not spec or spec in ("stop", "none", False):
@@ -1042,19 +1083,19 @@ class VNApp:
             return
         if isinstance(spec, dict):
             path_val = spec.get("file") or spec.get("path", "")
-            volume   = float(spec.get("volume", 1.0))
-            loops    = -1 if spec.get("loop", False) else 0
+            volume = float(spec.get("volume", 1.0))
+            loops = -1 if spec.get("loop", False) else 0  # -1 = boucle infinie dans pygame
         else:
             path_val = str(spec)
-            volume   = 1.0
-            loops    = 0
+            volume = 1.0
+            loops = 0
         try:
             path = Path(path_val)
             if not path.is_absolute():
                 path = (self.base_dir / path).resolve()
             sound = pygame.mixer.Sound(str(path))
             sound.set_volume(max(0.0, min(1.0, volume)))
-            channel = pygame.mixer.find_channel(True)
+            channel = pygame.mixer.find_channel(True)  # True = vole le canal le plus ancien si tous occupés
             if channel:
                 channel.play(sound, loops=loops)
         except Exception as error:
@@ -1066,6 +1107,10 @@ class VNApp:
 
     @staticmethod
     def _parse_overlay_transforms(spec):
+        """
+        Extrait les paramètres d'animation de l'overlay depuis le dict YAML.
+        Retourne (t_translate, t_scale, t_rotate), chacun étant un dict ou None.
+        """
         t_translate = None
         if "translate" in spec:
             t = spec["translate"]
@@ -1100,6 +1145,7 @@ class VNApp:
 
     @staticmethod
     def _overlay_transform_progress(params, elapsed_ms):
+        """Retourne la progression (0.0–1.0) d'une transformation d'overlay, avec support ping-pong."""
         duration = params["duration"]
         if params.get("loop"):
             # Ping-pong : 0→1→0→1…
@@ -1107,7 +1153,8 @@ class VNApp:
             return cycle if cycle <= 1.0 else 2.0 - cycle
         return min(1.0, elapsed_ms / duration)
 
-    def _load_overlay(self, spec):
+    def _load_overlay(self, spec: str | dict | None) -> None:
+        """Ajoute un overlay visuel (image, GIF, vidéo) par-dessus la scène ; remplace si même clé."""
         if not spec:
             return
         if isinstance(spec, str):
@@ -1117,8 +1164,8 @@ class VNApp:
         opacity = max(0, min(255, int(spec.get("opacity", 255))))
         ox      = int(spec.get("x", 0))
         oy      = int(spec.get("y", 0))
-        ow      = int(spec.get("width",  spec.get("w", 0))) or self.W
-        oh      = int(spec.get("height", spec.get("h", 0))) or self.H
+        ow = int(spec.get("width",  spec.get("w", 0))) or self.width
+        oh = int(spec.get("height", spec.get("h", 0))) or self.height
         t_translate, t_scale, t_rotate = self._parse_overlay_transforms(spec)
 
         path = Path(path_val)
@@ -1164,7 +1211,9 @@ class VNApp:
             except Exception as error:
                 print(f"[Overlay] {error}")
 
-    def _load_overlay_gif(self, path, w, h):
+    def _load_overlay_gif(
+        self, path: Path, w: int, h: int
+    ) -> list[tuple[pygame.Surface, int]] | None:
         try:
             from PIL import Image
         except ImportError:
@@ -1187,8 +1236,13 @@ class VNApp:
             return None
         return frames or None
 
-    def _open_video_overlay(self, path, w, h, loop, opacity, ox, oy, key,
-                             t_translate=None, t_scale=None, t_rotate=None):
+    def _open_video_overlay(
+        self, path: Path, w: int, h: int,
+        loop: bool, opacity: int, ox: int, oy: int, key: str,
+        t_translate: dict | None = None,
+        t_scale: dict | None = None,
+        t_rotate: dict | None = None,
+    ) -> dict | None:
         try:
             import cv2
         except ImportError:
@@ -1214,7 +1268,7 @@ class VNApp:
         self._advance_overlay_video_frame(state)
         return state
 
-    def _advance_overlay_video_frame(self, state):
+    def _advance_overlay_video_frame(self, state: dict) -> None:
         import cv2
         capture = state["capture"]
         success, frame = capture.read()
@@ -1235,7 +1289,8 @@ class VNApp:
         ).convert()
         state["current_surf"] = pygame.transform.smoothscale(surf, (state["w"], state["h"]))
 
-    def _tick_overlays(self, delta_ms: int):
+    def _tick_overlays(self, delta_ms: int) -> None:
+        """Avance toutes les animations d'overlays actifs et supprime ceux qui sont terminés."""
         for state in self._overlays:
             if state["done"]:
                 continue
@@ -1246,6 +1301,7 @@ class VNApp:
                     _, frame_dur = state["frames"][state["frame_idx"]]
                     if state["elapsed"] < frame_dur:
                         break
+                    # Consomme la durée de la frame et passe à la suivante
                     state["elapsed"] -= frame_dur
                     next_idx = state["frame_idx"] + 1
                     if next_idx >= len(state["frames"]):
@@ -1262,7 +1318,8 @@ class VNApp:
                     self._advance_overlay_video_frame(state)
         self._overlays = [o for o in self._overlays if not o["done"]]
 
-    def _render_overlays(self):
+    def _render_overlays(self) -> None:
+        """Dessine tous les overlays actifs en appliquant scale, rotation, opacité et translation."""
         for state in self._overlays:
             if state["done"]:
                 continue
@@ -1315,7 +1372,11 @@ class VNApp:
     # Choix
     # ------------------------------------------------------------------
 
-    def _select_choice(self, index):
+    def _select_choice(self, index: int) -> None:
+        """
+        Valide le choix à l'index donné : applique les variables, empile les
+        sous-actions, puis reprend l'exécution en mode "running".
+        """
         if not 0 <= index < len(self.choices):
             return
 
@@ -1352,7 +1413,8 @@ class VNApp:
     # Sauvegarde / chargement
     # ------------------------------------------------------------------
 
-    def _build_save_data(self):
+    def _build_save_data(self) -> dict:
+        """Sérialise l'état courant du jeu en dict JSON-compatible pour la sauvegarde."""
         return {
             "scene_id": self.current_scene_id,
             "variables": dict(self.variables),
@@ -1367,7 +1429,8 @@ class VNApp:
             "extra_files": list(self._extra_files),
         }
 
-    def _restore_from_save(self, data):
+    def _restore_from_save(self, data: dict) -> None:
+        """Restaure l'état du jeu depuis un dict de sauvegarde (recharge la scène + pile)."""
         # Recharger les fichiers YAML supplémentaires avant la scène
         for rel_path in (data.get("extra_files") or []):
             self._load_extra_story(rel_path)
@@ -1391,11 +1454,11 @@ class VNApp:
         self.choices = list(data.get("choices") or [])
         self._choice_rects = []
 
-    def _quick_save(self):
+    def _quick_save(self) -> None:
         self.save_manager.save(1, self._build_save_data())
         self._notify("Partie sauvegardée  [F5]")
 
-    def _quick_load(self):
+    def _quick_load(self) -> None:
         data = self.save_manager.load(1)
         if data is None:
             self._notify("Aucune sauvegarde trouvée")
@@ -1403,7 +1466,7 @@ class VNApp:
         self._restore_from_save(data)
         self._notify("Partie chargée  [F9]")
 
-    def _notify(self, message, duration_ms=2000):
+    def _notify(self, message: str, duration_ms: int = 2000) -> None:
         self._notification = message
         self._notification_timer = duration_ms
 
@@ -1411,7 +1474,11 @@ class VNApp:
     # Affichage
     # ------------------------------------------------------------------
 
-    def _render(self):
+    def _render(self) -> None:
+        """
+        Dessine une frame complète dans cet ordre :
+        fond → personnages → overlays → boîte de dialogue → choix → notification → transition.
+        """
         self.screen.fill((20, 20, 30))
 
         delta_time = self.clock.get_time()
@@ -1451,7 +1518,8 @@ class VNApp:
 
         pygame.display.flip()
 
-    def _update_animated_background(self, delta_time):
+    def _update_animated_background(self, delta_time: int) -> None:
+        """Avance la frame du fond animé (vidéo ou GIF) en fonction du temps écoulé."""
         if self._bg_video is not None:
             self._bg_video_elapsed += delta_time
 
@@ -1479,11 +1547,12 @@ class VNApp:
                 self._bg_frame_idx
             ][0]
 
-    def _render_dialogue_box(self):
-        box_y = self.H - self._DLGBOX_H
+    def _render_dialogue_box(self) -> None:
+        """Dessine la boîte de dialogue en bas d'écran avec le nom du locuteur et le texte."""
+        box_y = self.height - self._DLGBOX_H
 
         box_surface = pygame.Surface(
-            (self.W, self._DLGBOX_H),
+            (self.width, self._DLGBOX_H),
             pygame.SRCALPHA,
         )
 
@@ -1518,13 +1587,14 @@ class VNApp:
                 y=y,
                 font=self.font_text,
                 color=self._TEXT_COLOR,
-                max_width=self.W - padding * 2,
+                max_width=self.width - padding * 2,
             )
 
-    def _render_choices(self):
+    def _render_choices(self) -> None:
+        """Dessine les boutons de choix au centre de l'écran avec surlignage au survol et au curseur clavier."""
         self._choice_rects = []
 
-        current_y = int(self.H * 0.42)
+        current_y = int(self.height * 0.42)
         padding_x = 60
         background_padding = 8
 
@@ -1540,9 +1610,9 @@ class VNApp:
             hit_rect = pygame.Rect(
                 padding_x - background_padding,
                 current_y - background_padding,
-                self.W - padding_x * 2,
+                self.width - padding_x * 2,
                 line_height + background_padding * 2,
-            )
+            )  # zone cliquable plus grande que le texte pour faciliter la sélection
 
             self._choice_rects.append(hit_rect)
 
@@ -1579,7 +1649,8 @@ class VNApp:
 
             current_y += line_height + 14
 
-    def _render_notification(self):
+    def _render_notification(self) -> None:
+        """Affiche un toast en haut à droite (ex : confirmation de sauvegarde)."""
         if not self._notification:
             return
         surface = self.font_choice.render(
@@ -1587,7 +1658,7 @@ class VNApp:
             True,
             (100, 255, 100),
         )
-        x = self.W - surface.get_width() - 20
+        x = self.width - surface.get_width() - 20
         y = 20
         bg = pygame.Surface(
             (surface.get_width() + 16, surface.get_height() + 10),
@@ -1599,13 +1670,14 @@ class VNApp:
 
     def _draw_text_wrapped(
         self,
-        text,
-        x,
-        y,
-        font,
-        color,
-        max_width,
-    ):
+        text: str,
+        x: int,
+        y: int,
+        font: pygame.font.Font,
+        color: tuple[int, int, int],
+        max_width: int,
+    ) -> None:
+        """Dessine `text` en le découpant en lignes pour ne pas dépasser `max_width` pixels."""
         current_line = ""
 
         for word in str(text).split():

@@ -1,9 +1,14 @@
+from __future__ import annotations
+
 import pygame
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-# Centre x du personnage en fraction de la largeur d'écran (0.0 gauche, 1.0 droite)
-# et bas du personnage en fraction de la hauteur (0.0 haut, 1.0 bas)
-_NAMED_POSITIONS = {
+if TYPE_CHECKING:
+    from vn_engine.animations import BaseAnimation
+
+# Character position presets: (center_x_fraction, bottom_y_fraction)
+_NAMED_POSITIONS: dict[str, tuple[float, float]] = {
     "left":         (0.18, 0.88),
     "l":            (0.18, 0.88),
     "center_left":  (0.33, 0.88),
@@ -15,10 +20,10 @@ _NAMED_POSITIONS = {
     "right":        (0.82, 0.88),
     "r":            (0.82, 0.88),
 }
-_DEFAULT_POS = (0.50, 0.88)
+_DEFAULT_POS: tuple[float, float] = (0.50, 0.88)
 
 
-def _parse_position(raw):
+def _parse_position(raw: str | dict | None) -> tuple[float, float]:
     """
     Retourne (x_frac, y_frac) :
       - x_frac : centre horizontal du personnage / largeur d'écran
@@ -41,36 +46,35 @@ def _parse_position(raw):
 class Character:
     def __init__(
         self,
-        char_id,
-        name,
-        image_path=None,
-        position="center",
-        base_dir=None,
-    ):
-        self.id = char_id
-        self.name = name
-        self.image_path = image_path
-        self.default_position = position
-        self.base_dir = Path(base_dir) if base_dir else Path(".")
+        char_id: str,
+        name: str,
+        image_path: str | None = None,
+        position: str | dict = "center",
+        base_dir: str | Path | None = None,
+    ) -> None:
+        self.id: str = char_id
+        self.name: str = name
+        self.image_path: str | None = image_path
+        self.default_position: str | dict = position
+        self.base_dir: Path = Path(base_dir) if base_dir else Path(".")
 
-        self._surf_original = None
+        self._surf_original: pygame.Surface | None = None
 
         # Image normale, utilisée quand le personnage parle.
-        self.surf = None
+        self.surf: pygame.Surface | None = None
 
-        # Cache des versions assombries.
-        # La clé correspond à la valeur de dim_amount.
-        self._dimmed_surfaces = {}
+        # Cache des versions assombries (clé = valeur de dim_amount).
+        self._dimmed_surfaces: dict[int, pygame.Surface] = {}
 
-        self.rect = None
-        self.visible = False
-        self._animation = None
+        self.rect: pygame.Rect | None = None
+        self.visible: bool = False
+        self._animation: BaseAnimation | None = None
 
     # ------------------------------------------------------------------
     # Chargement et redimensionnement
     # ------------------------------------------------------------------
 
-    def load(self, screen_size):
+    def load(self, screen_size: tuple[int, int]) -> None:
         if not self.image_path:
             return
 
@@ -98,7 +102,7 @@ class Character:
             self.surf = None
             self.rect = None
 
-    def _scale(self, screen_size):
+    def _scale(self, screen_size: tuple[int, int]) -> None:
         if self._surf_original is None:
             return
 
@@ -128,7 +132,7 @@ class Character:
     # Position et visibilité
     # ------------------------------------------------------------------
 
-    def place(self, screen_size, position=None):
+    def place(self, screen_size: tuple[int, int], position: str | dict | None = None) -> None:
         if self.surf is None:
             return
 
@@ -153,14 +157,14 @@ class Character:
         self.rect = pygame.Rect(x, y, image_width, image_height)
         self.visible = True
 
-    def hide(self):
+    def hide(self) -> None:
         self.visible = False
 
     # ------------------------------------------------------------------
     # Assombrissement
     # ------------------------------------------------------------------
 
-    def _get_dimmed_surface(self, dim_amount):
+    def _get_dimmed_surface(self, dim_amount: int) -> pygame.Surface | None:
         """
         Retourne une copie assombrie de l'image du personnage.
 
@@ -209,7 +213,7 @@ class Character:
     # Affichage
     # ------------------------------------------------------------------
 
-    def render(self, screen, is_speaking, dim_amount=120):
+    def render(self, screen: pygame.Surface, is_speaking: bool, dim_amount: int = 120) -> None:
         """
         Affiche le personnage.
 
@@ -239,8 +243,8 @@ class Character:
 
 
 class CharacterRegistry:
-    def __init__(self, data, base_dir):
-        self._chars = {}
+    def __init__(self, data: dict | None, base_dir: str | Path) -> None:
+        self._chars: dict[str, Character] = {}
 
         for character_id, config in (data or {}).items():
             self._chars[character_id] = Character(
@@ -251,13 +255,13 @@ class CharacterRegistry:
                 base_dir=base_dir,
             )
 
-    def get(self, char_id):
+    def get(self, char_id: str) -> Character | None:
         return self._chars.get(char_id)
 
-    def all(self):
+    def all(self) -> list[Character]:
         return list(self._chars.values())
 
-    def show(self, char_id, screen_size, position=None):
+    def show(self, char_id: str, screen_size: tuple[int, int], position: str | dict | None = None) -> None:
         character = self._chars.get(char_id)
 
         if character is None:
@@ -272,17 +276,17 @@ class CharacterRegistry:
             position=position,
         )
 
-    def hide(self, char_id):
+    def hide(self, char_id: str) -> None:
         character = self._chars.get(char_id)
 
         if character is not None:
             character.hide()
 
-    def hide_all(self):
+    def hide_all(self) -> None:
         for character in self._chars.values():
             character.hide()
 
-    def register(self, char_id, config, base_dir):
+    def register(self, char_id: str, config: dict, base_dir: str | Path) -> None:
         """Ajoute un personnage depuis un autre fichier YAML (ignoré si l'id existe déjà)."""
         if char_id in self._chars:
             return
@@ -294,7 +298,7 @@ class CharacterRegistry:
             base_dir=base_dir,
         )
 
-    def resolve_speaker(self, speaker_name):
+    def resolve_speaker(self, speaker_name: str) -> str | None:
         """
         Retourne l'identifiant correspondant à l'identifiant ou au nom
         affiché d'un personnage, sans tenir compte de la casse.

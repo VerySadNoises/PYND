@@ -8,18 +8,22 @@ Pour ajouter une animation personnalisée :
 
     @register("ma_rotation")
     class MaRotation(BaseAnimation):
-        def get_transform(self, rect, surf):
+        def get_transform(
+            self, rect: pygame.Rect, surf: pygame.Surface
+        ) -> tuple[pygame.Surface, pygame.Rect]:
             angle = self.progress * 360
             rotated = pygame.transform.rotate(surf, angle)
             new_rect = rotated.get_rect(center=rect.center)
             return rotated, new_rect
 """
 
+from __future__ import annotations
+
 import math
 import random
 import pygame
 
-_REGISTRY: dict = {}
+_REGISTRY: dict[str, type[BaseAnimation]] = {}
 
 
 def register(name: str):
@@ -30,7 +34,7 @@ def register(name: str):
     return decorator
 
 
-def create(name: str, duration_ms: int = 500, **kwargs):
+def create(name: str, duration_ms: int = 500, **kwargs) -> BaseAnimation | None:
     """Instancie une animation par son nom avec des paramètres optionnels."""
     cls = _REGISTRY.get(name)
     if cls is None:
@@ -44,15 +48,21 @@ def create(name: str, duration_ms: int = 500, **kwargs):
 class BaseAnimation:
     """
     Base pour toutes les animations de personnage.
+
+    À chaque frame, le moteur appelle `tick(delta_ms)` pour avancer le temps,
+    puis `get_transform(rect, surf)` pour obtenir la surface et le rect modifiés.
+    Quand `done` passe à True, le moteur retire l'animation du personnage.
+
     Sous-classes : implémenter get_transform(rect, surf).
     """
 
     def __init__(self, duration_ms: int = 500):
-        self.duration_ms = max(1, int(duration_ms))
-        self._elapsed = 0
-        self.done = False
+        self.duration_ms = max(1, int(duration_ms))  # durée totale en ms
+        self._elapsed = 0    # temps écoulé depuis le début
+        self.done = False    # passe à True quand l'animation est terminée
 
-    def tick(self, delta_ms: int):
+    def tick(self, delta_ms: int) -> None:
+        """Avance l'animation de `delta_ms` millisecondes et marque done si terminée."""
         self._elapsed = min(self._elapsed + delta_ms, self.duration_ms)
         if self._elapsed >= self.duration_ms:
             self.done = True
@@ -62,7 +72,9 @@ class BaseAnimation:
         """0.0 (début) → 1.0 (fin)."""
         return self._elapsed / self.duration_ms
 
-    def get_transform(self, rect: pygame.Rect, surf: pygame.Surface):
+    def get_transform(
+        self, rect: pygame.Rect, surf: pygame.Surface
+    ) -> tuple[pygame.Surface, pygame.Rect]:
         """Retourne (surface, rect) modifiés par l'animation."""
         raise NotImplementedError
 
@@ -80,6 +92,7 @@ class Shake(BaseAnimation):
         self.intensity = int(intensity)
 
     def get_transform(self, rect, surf):
+        # L'intensité décroît linéairement vers 0 pour atténuer le tremblement en fin d'animation
         fade = 1.0 - self.progress
         amt = int(self.intensity * fade)
         if amt <= 0:
@@ -99,7 +112,7 @@ class ScaleUp(BaseAnimation):
         self.target_scale = float(scale)
 
     def get_transform(self, rect, surf):
-        # Enveloppe parabolique 0 → max → 0
+        # Enveloppe parabolique 4t(1-t) : vaut 0 aux extrémités et 1 au milieu
         envelope = 4 * self.progress * (1.0 - self.progress)
         s = 1.0 + (self.target_scale - 1.0) * envelope
         new_w = max(1, int(surf.get_width() * s))
@@ -117,6 +130,7 @@ class Bounce(BaseAnimation):
         self.height = int(height)
 
     def get_transform(self, rect, surf):
+        # Enveloppe parabolique : forme un arc symétrique 0 → max → 0
         arc = 4 * self.progress * (1.0 - self.progress)
         return surf, rect.move(0, -int(self.height * arc))
 
@@ -149,7 +163,8 @@ class SlideIn(BaseAnimation):
 
     def get_transform(self, rect, surf):
         t = self.progress
-        ease = t * t * (3.0 - 2.0 * t)  # smooth-step
+        ease = t * t * (3.0 - 2.0 * t)  # smooth-step : accélère puis décélère
+        # Décalage diminue de dx→0 au fil du temps
         return surf, rect.move(
             int(self.dx * (1.0 - ease)),
             int(self.dy * (1.0 - ease)),
@@ -167,7 +182,8 @@ class SlideOut(BaseAnimation):
 
     def get_transform(self, rect, surf):
         t = self.progress
-        ease = t * t * (3.0 - 2.0 * t)
+        ease = t * t * (3.0 - 2.0 * t)  # smooth-step
+        # Décalage augmente de 0→dx au fil du temps
         return surf, rect.move(int(self.dx * ease), int(self.dy * ease))
 
 
@@ -177,6 +193,7 @@ class FadeIn(BaseAnimation):
 
     def get_transform(self, rect, surf):
         copy = surf.copy()
+        # BLEND_RGBA_MULT multiplie chaque composante : ici on ne touche que l'alpha
         copy.fill((255, 255, 255, int(255 * self.progress)), special_flags=pygame.BLEND_RGBA_MULT)
         return copy, rect
 
@@ -187,6 +204,7 @@ class FadeOut(BaseAnimation):
 
     def get_transform(self, rect, surf):
         copy = surf.copy()
+        # Alpha passe de 255 à 0 au fil de l'animation
         copy.fill((255, 255, 255, int(255 * (1.0 - self.progress))), special_flags=pygame.BLEND_RGBA_MULT)
         return copy, rect
 
@@ -233,10 +251,11 @@ class Swing(BaseAnimation):
 
     def __init__(self, duration_ms: int = 600, angle: float = 15.0, oscillations: float = 2.5):
         super().__init__(duration_ms)
-        self.angle = float(angle)
-        self.oscillations = float(oscillations)
+        self.angle = float(angle)              # amplitude max en degrés
+        self.oscillations = float(oscillations)  # nombre d'aller-retours complets
 
     def get_transform(self, rect, surf):
+        # L'amplitude diminue linéairement pour atténuer le balancement
         fade = 1.0 - self.progress
         a = math.sin(self.progress * math.pi * 2 * self.oscillations) * self.angle * fade
         rotated = pygame.transform.rotate(surf, a)
@@ -281,12 +300,13 @@ class _MoveTo(BaseAnimation):
 
     def __init__(self, duration_ms: int = 400, start_x: int = 0, start_y: int = 0):
         super().__init__(duration_ms)
-        self.start_x = int(start_x)
+        self.start_x = int(start_x)  # position de départ (avant le déplacement)
         self.start_y = int(start_y)
 
     def get_transform(self, rect, surf):
         t = self.progress
-        ease = t * t * (3.0 - 2.0 * t)  # smooth-step
+        ease = t * t * (3.0 - 2.0 * t)  # smooth-step : accélère puis décélère
+        # Interpolation linéaire entre la position de départ et la destination (rect.x/y)
         x = int(self.start_x + (rect.x - self.start_x) * ease)
         y = int(self.start_y + (rect.y - self.start_y) * ease)
         return surf, pygame.Rect(x, y, rect.width, rect.height)
